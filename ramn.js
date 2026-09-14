@@ -17,6 +17,8 @@
 //   sloppycan.js  clearFrames():  if (window.ramnClear) ramnClear();
 //   sloppycan.js  disconnect path: if (window.ramnStop) ramnStop();
 //   sloppycan.js  demoTick(): payload = window.ramnCtrlPayload ? ramnCtrlPayload(id) : [0,0];
+//   sloppycan.js  demoTick(): returns early while !ramnTrafficOn()  (the panel's Disable traffic)
+//   carlito.js    message handler: ramnSetTraffic(!challenge) on the envelope's challenge edges
 //   sloppycan.js  startDemo(): if (window.ramnDemoStarted) ramnDemoStarted();  (records demo → pairs Control Panel)
 //// Live-only: no persistence of window position/state.
 
@@ -132,6 +134,10 @@
 .ramn-joypad button.sp { visibility:hidden; }
 .ramn-joypad button.held { background:var(--blue-dim); color:var(--blue); border-color:transparent; }
 .ramn-joypad button.on { background:var(--green-dim); color:var(--green); border-color:transparent; }
+/* Traffic off: the simulated frames stop, so the controls that feed them grey out. */
+.ramn-header .ramn-dot.ctrl.off { background:var(--text3); }
+.ramn-ctrl-off .ramn-sec:not(.ramn-traffic-sec) { opacity:.35; pointer-events:none; }
+.ramn-base-note { margin-top:6px; font-size:10px; color:var(--amber); }
 .ramn-hint {
   margin-top:6px; padding-top:9px; border-top:1px solid var(--border);
   font-size:9.5px; color:var(--text3); line-height:1.5;
@@ -324,6 +330,10 @@ ctrlWin.innerHTML = `
   </div>
   <div class="ramn-scaleouter" id="ramnCtrlScaleOuter">
    <div class="ramn-body" id="ramnCtrlBody">
+    <div class="ramn-sec ramn-traffic-sec">
+      <div class="ramn-toggle" id="ramnCtrlTraffic" title="Stop / resume the simulated RAMN frames. While stopped, the RAMN dashboard and Carlito read only the frames you send yourself. Turned off automatically when a Carlito challenge starts and back on when it ends.">Disable traffic</div>
+      <div class="ramn-base-note" id="ramnCtrlBaseNote" style="display:none;"></div>
+    </div>
     <div class="ramn-sec">
       <div class="ramn-sec-lbl"><span>Brake</span><span class="v" id="ramnCtrlBrakeV">0%</span></div>
       <input type="range" class="ramn-range brake" id="ramnCtrlBrake" min="0" max="100" value="0">
@@ -383,6 +393,10 @@ function blankState() {
   };
 }
 let ramnState = blankState();
+// RAMN-backed carlito.js uplink fields (IN_SOURCES) seen since the last ramnClear - "seen",
+// never a freshness timeout, so a single hand-sent frame keeps latching the way ramnState itself
+// does. Populated by ramnIngestFrame, one add per field per decoded frame; reset with ramnState.
+let ramnSeenFields = new Set();
 let dirty = true, rafPending = false;
 let dashScale = () => {}, ctrlScale = () => {};
 
@@ -394,6 +408,12 @@ const ramnCtrl = {
   horn: 0, lights: 1, key: 3,     // key defaults to Ignition so demo driving passes Carlito's engine gate
   turnL: 0, turnR: 0, handbrake: 0
 };
+
+// Whether the demo emits the RAMN frames at all (sloppycan.js demoTick asks ramnTrafficOn).
+// Off is "nothing on the bus": the decoded state is cleared, so the uplink stops repeating the
+// last panel values and a hand-sent frame is the only thing that drives. The panel's own values
+// are kept and resume when traffic comes back.
+let ramnTraffic = true;
 
 // big-endian first two data bytes
 function be16(d) { return ((d[0] || 0) << 8) | (d[1] || 0); }
@@ -443,19 +463,21 @@ function ramnIngestFrame(frame) {
   if (frame.isExt) return;            // RAMN uses 11-bit IDs
   const d = frame.data, st = ramnState;
   switch (frame.id) {
-    case 0x024: st.brakeRaw = be16(d) & 0xFFF; st.brake = st.brakeRaw / 0xFFF * 100; break;
-    case 0x039: st.accel = (be16(d) & 0xFFF) / 0xFFF * 100; break;
+    case 0x024: st.brakeRaw = be16(d) & 0xFFF; st.brake = st.brakeRaw / 0xFFF * 100; ramnSeenFields.add('brake'); break;
+    case 0x039: st.accel = (be16(d) & 0xFFF) / 0xFFF * 100; ramnSeenFields.add('accel'); break;
     case 0x062: {                      // user spec: 0x000=L100%, 0x7FF=centre, 0xFFF=R100%
       const raw = be16(d) & 0xFFF;
       st.steer = (raw - 0x7FF) / 0x7FF * 100;
+      ramnSeenFields.add('steer');
       break;
     }
     case 0x077:
       st.gear = (d[0] === 0xFF) ? 'R' : (d[0] >= 1 && d[0] <= 6 ? d[0] : null);
       st.joy  = d[1] || 1;
+      ramnSeenFields.add('gear');
       break;
-    case 0x098: st.horn = (d[0] || 0) !== 0; break;
-    case 0x1B8: if (d[0] >= 1 && d[0] <= 3) st.key = d[0]; break;
+    case 0x098: st.horn = (d[0] || 0) !== 0; ramnSeenFields.add('horn'); break;
+    case 0x1B8: if (d[0] >= 1 && d[0] <= 3) { st.key = d[0]; ramnSeenFields.add('key'); } break;
     // 0x1A7 (turn-indicator CONTROL) deliberately does NOT drive the lit state: the indicator
     // mirrors only the 0x1BB LED-status bit. 0x1A7 is the held button command and would fight
     // 0x1BB's blink toggling, causing flicker.
@@ -470,9 +492,10 @@ function ramnIngestFrame(frame) {
       st.turnL       = !!(b & 0x40);
       st.turnR       = !!(b & 0x80);
       st.lights      = st.highbeam ? 4 : st.lowbeam ? 3 : st.clearance ? 2 : 1; // exported for carlito.js
+      ['battery', 'checkEngine', 'brakeLamp', 'turnL', 'turnR', 'lights'].forEach(f => ramnSeenFields.add(f));
       break;
     }
-    case 0x1D3: st.handbrake = (d[0] || 0) !== 0; break;
+    case 0x1D3: st.handbrake = (d[0] || 0) !== 0; ramnSeenFields.add('handbrake'); break;
     default: return;                   // not a dashboard signal - skip render
   }
   dirty = true;
@@ -539,7 +562,7 @@ function renderDashboard() {
 }
 
 // ── Lifecycle hooks ─────────────────────────────────────────────────────────────
-function ramnClear() { ramnState = blankState(); dirty = true; requestAnimationFrame(renderDashboard); }
+function ramnClear() { ramnState = blankState(); ramnSeenFields = new Set(); dirty = true; requestAnimationFrame(renderDashboard); }
 function ramnStop()  { ramnClear(); }
 
 // Demo mode pairs the driving Control Panel with the dashboard (#3). Recorded when
@@ -608,6 +631,30 @@ function syncCtrlUI() {
   cel.hand.classList.toggle('on', !!ramnCtrl.handbrake); cel.hand.classList.toggle('red', !!ramnCtrl.handbrake);
 }
 
+function syncTrafficUI() {
+  // The demo's base traffic can be something other than RAMN (J1939, NMEA 2000, ...), in which
+  // case nothing decodes these sliders' frames either - grey the whole panel the same as
+  // ramnTraffic off, and say why.
+  const baseNotRamn = window.demoGetBaseTraffic && window.demoGetBaseTraffic() !== 'ramn';
+  cel.body.classList.toggle('ramn-ctrl-off', !ramnTraffic || baseNotRamn);
+  cel.dot.classList.toggle('off', !ramnTraffic || baseNotRamn);
+  cel.traffic.textContent = ramnTraffic ? 'Disable traffic' : 'Enable traffic';
+  cel.traffic.classList.toggle('on', !ramnTraffic); cel.traffic.classList.toggle('amber', !ramnTraffic);
+  [cel.brake, cel.accel, cel.steer].forEach(r => { r.disabled = !ramnTraffic || baseNotRamn; });
+  cel.baseNote.style.display = baseNotRamn ? '' : 'none';
+  if (baseNotRamn) cel.baseNote.textContent = 'RAMN traffic is off - the base traffic is ' + window.demoBaseTrafficLabel() + '.';
+}
+
+function ramnSetTraffic(on) {
+  on = !!on;
+  if (on === ramnTraffic) return;
+  ramnTraffic = on;
+  // Demo only: on a live bus the board is the traffic, and clearing would blip key Off to the
+  // game until its next 0x1B8.
+  if (!on && demoEnabled) ramnClear();
+  syncTrafficUI();
+}
+
 // ── Wire DOM + window mechanics ───────────────────────────────────────────────
 (function wire() {
   document.body.appendChild(win);
@@ -653,8 +700,11 @@ function syncCtrlUI() {
     steer: ctrlWin.querySelector('#ramnCtrlSteer'), steerV: ctrlWin.querySelector('#ramnCtrlSteerV'),
     joypad: ctrlWin.querySelector('#ramnCtrlJoy'), gearV: ctrlWin.querySelector('#ramnCtrlGearV'),
     lights: ctrlWin.querySelector('#ramnCtrlLights'), key: ctrlWin.querySelector('#ramnCtrlKey'),
-    hand: ctrlWin.querySelector('#ramnCtrlHand')
+    hand: ctrlWin.querySelector('#ramnCtrlHand'),
+    traffic: ctrlWin.querySelector('#ramnCtrlTraffic'), body: ctrlWin.querySelector('#ramnCtrlBody'),
+    dot: ctrlWin.querySelector('.ramn-dot.ctrl'), baseNote: ctrlWin.querySelector('#ramnCtrlBaseNote')
   };
+  cel.traffic.addEventListener('click', () => ramnSetTraffic(!ramnTraffic));
 
   cel.brake.addEventListener('input', () => { ramnCtrl.brake = +cel.brake.value; cel.brakeV.textContent = ramnCtrl.brake + '%'; });
   cel.accel.addEventListener('input', () => { ramnCtrl.accel = +cel.accel.value; cel.accelV.textContent = ramnCtrl.accel + '%'; });
@@ -714,7 +764,8 @@ function syncCtrlUI() {
     d: ['steer', 100], arrowright: ['steer', 100]
   };
   document.addEventListener('keydown', e => {
-    if (!ctrlWin.classList.contains('open') || isField(e.target) || e.repeat) return;
+    // keyup stays ungated: a key held across the switch-off must still release.
+    if (!ctrlWin.classList.contains('open') || !ramnTraffic || isField(e.target) || e.repeat) return;
     if (e.key === ' ') { e.preventDefault(); ramnCtrl.handbrake = 1; syncCtrlUI(); return; } // Space = handbrake (momentary)
     const m = DRIVE[e.key.toLowerCase()]; if (!m) return;
     e.preventDefault();
@@ -730,6 +781,7 @@ function syncCtrlUI() {
   });
 
   syncCtrlUI();
+  syncTrafficUI();
 })();
 
 // ── Expose hooks ────────────────────────────────────────────────────────────────
@@ -745,5 +797,11 @@ window.ramnSetPairOpen = ramnSetPairOpen;   // ← used by drone.js to hand the 
 window.ramnSetDashOpen = setDashOpen;
 window.makeFloating = makeFloating;         // ← shared window mechanics (drone.js reuses them)
 window.ramnDemoStarted = ramnDemoStarted;
+window.ramnSetTraffic = ramnSetTraffic;               // ← carlito.js, on a challenge starting / ending
+window.ramnSyncTrafficUI = syncTrafficUI;             // ← sloppycan.js demoSetBaseTraffic
+window.ramnTrafficOn = () => ramnTraffic;             // ← sloppycan.js demoTick
 // Live interpreted signal state (decoded from CAN - hardware or demo). Read by carlito.js.
 window.ramnGetState = () => ({ ...ramnState });
+// Whether an IN_SOURCES field name's RAMN frame has been decoded since the last ramnClear. Read
+// by carlito.js so a field with no frame yet is omitted rather than sent at its blank default.
+window.ramnSeen = name => ramnSeenFields.has(name);

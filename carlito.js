@@ -70,6 +70,11 @@
 .carlito-bar button.on { background:var(--green-dim); color:var(--green); border-color:transparent; }
 .carlito-link { color:var(--text2); }
 .carlito-link.on { background:var(--green-dim); color:var(--green); border-color:transparent; }
+.carlito-nodrive {
+  display:none; padding:3px 9px; border-radius:5px; font-size:11px; white-space:nowrap;
+  background:var(--amber-dim); color:var(--amber);
+}
+.carlito-nodrive.on { display:inline-block; }
 /* OUT | IN status panel: left = data sent from sloppyCAN, right = data received from Carlito. */
 .carlito-io {
   display:flex; flex-shrink:0; background:var(--bg2); border-bottom:1px solid var(--border);
@@ -118,6 +123,7 @@
       <button id="carlitoKbd" title="Block physical keyboard from reaching the game (JS bridge still drives)">⌨ on</button>
       <button class="carlito-link on" id="carlitoUp" title="Uplink: send RAMN controls into the game (SloppyCAN → Carlito)">Up ●</button>
       <button class="carlito-link on" id="carlitoDown" title="Downlink: forward the game's telemetry as CAN 0x520–0x52B (Carlito → SloppyCAN)">Down ●</button>
+      <span class="carlito-nodrive" id="carlitoNoDrive" title="The built uplink has no accel, brake or steer - the game falls back to its own keyboard (not during a challenge)">no driving controls</span>
       <button class="carlito-iocaret" id="carlitoIoCaret" title="Show/hide debug panel">▸ debug</button>
     </div>
     <div class="carlito-io collapsed" id="carlitoIo">
@@ -214,6 +220,7 @@
   // plenty for control input. Safe in the full app too - controls don't need 60Hz.
   let lastPumpT = 0;
   const UPLINK_MS = 28;   // ~33–36 Hz
+  let noDriveShown = false;   // last-applied state of the "no driving controls" bar note
   const el = {};
   const OUT_IDS = ['co_accel','co_brake','co_steer','co_hand','co_key','co_lights','co_gear','co_turn','co_horn','co_check','co_batt','co_brakelamp'];
   const IN_IDS = ['ci_kmh','ci_rpm','ci_gear','ci_throttle','ci_yaw','ci_acclong','ci_acclat','ci_steer','ci_slip','ci_ground','ci_head','ci_pos','ci_lat','ci_lon','ci_odo','ci_status','ci_impact','ci_fuel','ci_coolant','ci_batt'];
@@ -253,22 +260,26 @@
   // and every lamp bit is mirrored verbatim from the bus, so a zero we invented for a control
   // nobody has wired would be a claim ("the source says off") that no source is making. Omitting
   // it is the honest statement, and it is what makes the checklist in checkOutFields meaningful.
+  //
+  // A RAMN-backed entry is doubly gated: it also returns undefined until ramnSeen(name) says its
+  // frame has been decoded since the last ramnClear (never sent, never off, "no frame yet") -
+  // "seen", not fresh, so a single hand-sent frame keeps latching the way ramnState itself does.
   const IN_SOURCES = {
-    accel:     st => +st.accel || 0,
-    brake:     st => +st.brake || 0,
-    steer:     st => +st.steer || 0,
-    handbrake: st => st.handbrake,
-    key:       st => +st.key    || 1,
-    lights:    st => +st.lights || 1,
+    accel:     st => window.ramnSeen('accel')     ? (+st.accel || 0) : undefined,
+    brake:     st => window.ramnSeen('brake')     ? (+st.brake || 0) : undefined,
+    steer:     st => window.ramnSeen('steer')     ? (+st.steer || 0) : undefined,
+    handbrake: st => window.ramnSeen('handbrake') ? st.handbrake : undefined,
+    key:       st => window.ramnSeen('key')       ? (+st.key    || 1) : undefined,
+    lights:    st => window.ramnSeen('lights')    ? (+st.lights || 1) : undefined,
     // Gear byte follows the contract (0=N, 1-6=D1-D6, 0xFF=R) - same as the RAMN wire byte.
-    gear:      st => st.gear === 'R' ? GEAR_R_BYTE : (+st.gear || 0),
-    turnL:     st => st.turnL,
-    turnR:     st => st.turnR,
-    horn:      st => st.horn,
+    gear:      st => window.ramnSeen('gear')      ? (st.gear === 'R' ? GEAR_R_BYTE : (+st.gear || 0)) : undefined,
+    turnL:     st => window.ramnSeen('turnL')     ? st.turnL : undefined,
+    turnR:     st => window.ramnSeen('turnR')     ? st.turnR : undefined,
+    horn:      st => window.ramnSeen('horn')      ? st.horn : undefined,
     // Warning LEDs from the 0x1BB status bitfield, so Carlito's dashboard can show them.
-    checkEngine: st => st.checkEngine,
-    battery:     st => st.battery,
-    brakeLamp:   st => st.brakeLamp,   // 0x1BB bit 0x04 → rear stop lamp
+    checkEngine: st => window.ramnSeen('checkEngine') ? st.checkEngine : undefined,
+    battery:     st => window.ramnSeen('battery')     ? st.battery : undefined,
+    brakeLamp:   st => window.ramnSeen('brakeLamp')   ? st.brakeLamp : undefined,   // 0x1BB bit 0x04 → rear stop lamp
     // THE AIRCRAFT'S FLASHING LAMPS (contract v30), and this side owns the CLOCK. The game
     // mirrors these bits verbatim exactly as it mirrors turnL/turnR, and it has no blink timer
     // anywhere - LampSet's was deleted when these signals arrived. So what is sent is
@@ -402,7 +413,9 @@
       if (raw !== undefined) return coerceIn(sig, raw);
     }
     const src = IN_SOURCES[sig.name] || MODULE_IN_SOURCES[sig.name];
-    return src ? coerceIn(sig, src(st)) : undefined;
+    if (!src) return undefined;
+    const raw = src(st);
+    return raw === undefined ? undefined : coerceIn(sig, raw);
   }
 
   // Dev conformance: every field we send must be a contract "in" signal (plan §2 rule 4).
@@ -414,10 +427,11 @@
     // The inverse: declared "in" signals with no source. console.INFO, not warn, DELIBERATELY -
     // what is left is a known list, not a fault, and a warn on every page load would train
     // everyone to ignore it. In the full app that is the boat's `rudder` (steered on the RAMN
-    // steer axis, which the game accepts as the rudder), the plane's `elevator`/`flaps` and the
-    // train's `pantograph`/`doors`. carlito-bridge.html adds the ones whose owning module it does
-    // not load: the DM1 and trailer lamps (j1939.js) and the boat's `sheet` (boat-pilot.js).
-    // Everything else is sourced by a module rather than by RAMN state - see the four registries.
+    // steer axis, which the game accepts as the rudder). carlito-bridge.html adds the ones whose
+    // owning module it does not load: the DM1 and trailer lamps (j1939.js), the boat's `sheet`
+    // (boat-pilot.js), the train's `pantograph`/`doors` (train.js) and the plane's
+    // `elevator`/`flaps` (plane.js). Everything else is sourced by a module rather than by RAMN
+    // state - see the four registries.
     const unsourced = CONTRACT_IN_SIGS.filter(s => !inSource(s.name)).map(s => s.name);
     if (unsourced.length) console.info(`Carlito: ${unsourced.length} contract "in" signals have no uplink source yet (omitted, so the game uses their defaults): ` + unsourced.join(', '));
   }
@@ -476,6 +490,10 @@
         st = window.ramnGetState();
         const v = buildUplink(st);
         checkOutFields(v);
+        // Bar note, updated only when it changes - a DOM write every pump would fight the same
+        // main-thread budget the render-skip above protects.
+        const noDrive = v.accel === undefined && v.brake === undefined && v.steer === undefined;
+        if (noDrive !== noDriveShown) { noDriveShown = noDrive; el.noDrive.classList.toggle('on', noDrive); }
         try { iframe.contentWindow.postMessage({ type: 'carlitoInput', version: CONTRACT_VERSION, values: v }, GAME_ORIGIN); } catch (e) { /* not ready */ }
       }
       // Skip the debug-panel DOM writes when it's collapsed (the default). renderOut/renderIn rewrite
@@ -762,6 +780,7 @@
     const d = e.data;
     if (!d || d.type !== 'carlitoOutput' || !d.values) return;
     checkContractVersion(d.version);   // both sides warn on version mismatch (plan §3)
+    setChallenge(!!d.challenge);
     lastTel = d.values; lastTelT = performance.now();
     // Forward at the game's native cadence: fast IDs (0x520–0x523, 0x529–0x52A) every message, slow/low-rate IDs
     // (0x524–0x528, 0x52B) every other message (the 50/100 ms fast:slow split). The bridge's drop-stale
@@ -772,6 +791,22 @@
     }
     notifyTelemetry(lastTel);
   });
+  // ── Challenge attempts: the RAMN demo traffic steps aside ───────────────────
+  // The game's envelope carries `challenge` (not a contract signal). A challenge is driven by
+  // frames the player sends, which the demo's RAMN frames would overwrite every 10 ms, so traffic
+  // goes off when an attempt starts and back on when it ends. EDGES ONLY: in between, the RAMN
+  // Control toggle is the user's, so re-enabling mid-challenge sticks. An older game sends no
+  // field, reads false, and never toggles.
+  let lastChallenge = false;
+  function setChallenge(ch) {
+    if (ch === lastChallenge) return;
+    lastChallenge = ch;
+    if (window.ramnSetTraffic) window.ramnSetTraffic(!ch);
+    if (window.log && window.demoIsActive && window.demoIsActive()) window.log(ch
+      ? 'Carlito: challenge started - RAMN demo traffic disabled (re-enable it in RAMN Control)'
+      : 'Carlito: challenge ended - RAMN demo traffic re-enabled');
+  }
+
   // ── Telemetry hook: "which machine is on the link" ───────────────────────────
   // This file is the only place the game's telemetry arrives, and it knows no vehicle types -
   // it builds the same uplink and packs the same frames whatever is being driven. A panel that
@@ -847,6 +882,8 @@
       if (iframe) { iframe.remove(); iframe = null; }
       loaded = false; lastTel = null;
       notifyTelemetry(null);   // the link is gone - let a vehicle-specific panel close itself
+      setChallenge(false);     // no game, no attempt
+      if (noDriveShown) { noDriveShown = false; el.noDrive.classList.remove('on'); }
       if (el.placeholder) el.placeholder.style.display = '';
     }
     if (window.updateTermTrafficWarn) window.updateTermTrafficWarn(); // refresh serial-tab warning (#9)
@@ -860,6 +897,7 @@
     [...OUT_IDS, ...IN_IDS, 'ci_bar'].forEach(id => el[id] = win.querySelector('#' + id));
     el.up = win.querySelector('#carlitoUp');
     el.down = win.querySelector('#carlitoDown');
+    el.noDrive = win.querySelector('#carlitoNoDrive');
     el.dot = win.querySelector('#carlitoDot');
     el.io = win.querySelector('#carlitoIo');
     el.ioCaret = win.querySelector('#carlitoIoCaret');
@@ -906,6 +944,7 @@
       upOn = !upOn;
       el.up.classList.toggle('on', upOn);
       el.up.innerHTML = upOn ? 'Up ●' : 'Up ○';
+      if (!upOn && noDriveShown) { noDriveShown = false; el.noDrive.classList.remove('on'); }
       syncLinkDot();
     });
     el.down.addEventListener('click', () => {

@@ -571,6 +571,7 @@ function recordTxFrame(id, isExt, isRtr, dlc, data) {
       byteChangedAt: [], count: 1, firstSeen: now, lastSeen: now, timestamps: [now],
       hasRx: false, hasTx: true });
   }
+  if (window.scriptLinkFrame) scriptLinkFrame({ id, isExt, isRtr, dlc, data }); // ← Script link hook (our own TX)
 }
 
 async function txSendOne(msg) {
@@ -1445,6 +1446,9 @@ function ingestFrameBody(frame, opts) {
   // Always append to dump log (ring buffer - O(1), no GC pressure)
   dumpLog.push({ ts: now, isTx: false, isFwd: fwd, id: frame.id, isExt: frame.isExt, isRtr: frame.isRtr, dlc: frame.dlc, data: frame.data.slice() });
   dumpFilterDirty = true;
+  // Here, not with the module hooks below: one of them can answer synchronously (j1939ServeRequest →
+  // canForward), and scripts must see the request before its answer, as the dump does.
+  if (window.scriptLinkFrame) scriptLinkFrame(frame); // ← Script link hook
 
   if (frames.has(key)) {
     const existing = frames.get(key);
@@ -1549,7 +1553,7 @@ function toggleStatsCollapse() {
 // it's correct even though the buttons have different positioned offsetParents. The
 // deliberate full-width .header-sep break at ≤1200px is intentionally NOT counted.)
 function _buttonsWrap() {
-  const ids = ['connectBtn', 'demoBtn', 'ramnBtn', 'droneBtn', 'truckBtn', 'tractorBtn', 'boatBtn', 'boatPilotBtn', 'carlitoBtn', 'busPauseBtn', 'clearMainBtn', 'disconnectBtn'];
+  const ids = ['connectBtn', 'demoBtn', 'ramnBtn', 'droneBtn', 'truckBtn', 'tractorBtn', 'boatBtn', 'boatPilotBtn', 'trainBtn', 'planeBtn', 'carlitoBtn', 'busPauseBtn', 'clearMainBtn', 'disconnectBtn'];
   const tops = ids.map(id => document.getElementById(id))
                   .filter(b => b && b.offsetParent !== null)
                   .map(b => Math.round(b.getBoundingClientRect().top));
@@ -2719,6 +2723,7 @@ function crc32(bytes) {
 }
 
 function demoTick(id) {
+  if (window.ramnTrafficOn && !window.ramnTrafficOn()) return;   // RAMN Control's Disable traffic
   const cnt = (demoCounters[id] = ((demoCounters[id] || 0) + 1) & 0xFFFF);
   // RAMN Control Panel (demo only) supplies the payload bytes; default 0x0000.
   const payload = window.ramnCtrlPayload ? window.ramnCtrlPayload(id) : [0x00, 0x00];
@@ -2794,9 +2799,24 @@ function demoInitialBaseTraffic() {
 function demoSetBaseTraffic(kind) {
   demoStopBaseTimers();
   demoBaseTraffic = kind;
+  // Leaving RAMN means nothing on the bus decodes RAMN frames any more - the same "nothing on
+  // the bus" ramnSetTraffic(false) gives RAMN Control's Disable traffic, so carlito.js's uplink
+  // stops repeating the last decoded values.
+  if (kind !== 'ramn' && window.ramnClear) ramnClear();
   if (DEMO_J1939_KINDS.includes(kind) && window.j1939SetProto) window.j1939SetProto(kind);
   demoStartBaseTimers();
+  // Grey the RAMN Control Panel (and un-grey it) the moment the base traffic changes.
+  if (window.ramnSyncTrafficUI) window.ramnSyncTrafficUI();
 }
+
+// Display label for a demoBaseTraffic kind, for the RAMN Control Panel's off note.
+function demoBaseTrafficLabel(kind) {
+  return kind === 'nmea2000' ? 'NMEA 2000' : kind === 'iso11783' ? 'ISO 11783' :
+    kind === 'chademo' ? 'CHAdeMO' : kind === 'canopen' ? 'CANopen' :
+    kind === 'dronecan' ? 'DroneCAN' : kind === 'j1939' ? 'J1939' : 'RAMN';
+}
+window.demoGetBaseTraffic = () => demoBaseTraffic;
+window.demoBaseTrafficLabel = () => demoBaseTrafficLabel(demoBaseTraffic);
 
 // Prompt the user before changing demo base traffic. Returns true if the requested
 // kind is (now) the active base traffic. No-op outside demo mode.
@@ -2981,6 +3001,7 @@ function startDemo() {
   demoCounters = {};
   demoBaseTraffic = demoInitialBaseTraffic();
   demoStartBaseTimers();
+  if (window.ramnSyncTrafficUI) window.ramnSyncTrafficUI(); // a demo started on a non-RAMN tab
 
   document.getElementById('connectBtn').style.display = 'none';
   document.getElementById('disconnectBtn').style.display = 'none';
@@ -4822,7 +4843,8 @@ window.canForward = function (frame) {
   if (!txReady) return;
   // Fire-and-forget; the write is serialized inside sendCommand. txTransmitRaw is async, so swallow
   // any late rejection on the returned promise (errors are already logged) to avoid unhandled rejections.
-  txTransmitRaw({
+  // Returned so a caller that must keep its own frames in order (script-link.js) can await it.
+  return txTransmitRaw({
     id:  (frame.id >>> 0).toString(16).toUpperCase(),
     ext: !!frame.isExt, rtr: !!frame.isRtr,
     dlc: frame.dlc,

@@ -57,6 +57,16 @@ override replaces both channels (the selector hides while it is active) and also
 Demo mode simulates more protocols than a single real bus would carry at once, so each
 diagnostic module (UDS, OBD-II, KWP2000, …) only generates traffic while its tab is open.
 
+### Scripting
+
+Your own scripts can join the bus live. Run `python scripting/sloppycan_relay.py` (stdlib only),
+click **Script** (top right) and **Connect**, then run a script, e.g. `python scripting/example.py`. Scripts
+see every frame sloppyCAN sees, and what they send is treated as a frame on the wire (and
+transmitted when a bus is open). Any language works: the relay's TCP port `29541` speaks one
+`cansend`-style line per frame (`123#DEADBEEF`), so `nc 127.0.0.1 29541` is a live candump.
+Chrome asks once to allow local network access when the hosted page connects. Opened from
+`file://`? Start the relay with `--allow-file-origin`.
+
 ## Features
 
 ID List, Traffic Dump, TX Scheduler, Frame Inspector, Graph, Fuzzing, and protocol tabs for

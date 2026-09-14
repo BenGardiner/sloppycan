@@ -30,7 +30,10 @@
 <script src="tractor.js" defer></script><!-- Tractor dashboard: a vehicle panel, needs vehicle-panel.js + ramn.js -->
 <script src="boat.js" defer></script><!-- Boat dashboard: a vehicle panel, needs vehicle-panel.js + ramn.js -->
 <script src="boat-pilot.js" defer></script><!-- Boat autopilot control head: sources nav_mode/heading_cmd/sheet, needs vehicle-panel.js + ramn.js + boat.js -->
+<script src="train.js" defer></script><!-- Train controls: sources pantograph/doors, needs vehicle-panel.js + ramn.js -->
+<script src="plane.js" defer></script><!-- Plane controls: sources elevator/flaps, needs vehicle-panel.js + ramn.js -->
 <script src="carlito.js" defer></script><!-- Carlito game link module -->
+<script src="script-link.js" defer></script><!-- Script link: live frames to/from local scripts via scripting/sloppycan_relay.py -->
 </head>
 <body>
 
@@ -179,9 +182,21 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 12L12 5"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>
     <span>Autopilot</span>
   </button>
+  <button class="btn" id="trainBtn" onclick="trainToggle()" style="display:none" title="Toggle the train controls - pantograph and doors. Shown while a train is on the Carlito link. Claims nothing from the RAMN controls: the train is still driven on the RAMN accel/brake axes.">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="12" rx="2"/><path d="M12 2v3M9 17l-2 4M15 17l2 4"/><circle cx="9" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.2" fill="currentColor" stroke="none"/></svg>
+    <span>Train</span>
+  </button>
+  <button class="btn" id="planeBtn" onclick="planeToggle()" style="display:none" title="Toggle the plane controls - elevator and flaps. Shown while a plane is on the Carlito link. Claims nothing from the RAMN controls: the plane is still flown on the RAMN accel/brake/steer axes.">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l8-2 3-8 2 1-1 7 6 2v2l-6-1-1 5 2 2v1l-4-1-4 1v-1l2-2-1-5-6 1z"/></svg>
+    <span>Plane</span>
+  </button>
   <button class="btn" id="carlitoBtn" onclick="carlitoToggle()" title="Drive Carlito with RAMN controls - needs a live bus (Connect or Demo first).">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l2-5a2 2 0 0 1 1.9-1.4h10.2A2 2 0 0 1 19 8l2 5v5h-3v-2H6v2H3z"/><circle cx="7.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="16.5" cy="15.5" r="1.2" fill="currentColor"/></svg>
     <span>Carlito</span>
+  </button>
+  <button class="btn" id="scriptBtn" onclick="scriptLinkShow()" title="Script link - let your own scripts (Python or any language) read and send live frames on this bus through a local relay.">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-5-6-5"/><path d="M12 19h8"/></svg>
+    <span>Script</span><span id="scriptLinkStatus" class="sl-dot"></span>
   </button>
   <div class="sep sep-20"></div>
   <!-- Merged bus/pause button (cycles Open Bus → Pause → Resume) + Clear, moved into the header -->
@@ -447,6 +462,14 @@
             <button class="onboard-chip" data-target="#boatPilotBtn">
               <span class="oc-name">Autopilot</span>
               <span class="oc-desc">Standby/Auto, heading knob and sheet - the button is there while a boat is on the link</span>
+            </button>
+            <button class="onboard-chip" data-target="#trainBtn">
+              <span class="oc-name">Train</span>
+              <span class="oc-desc">Pantograph and doors - the button is there while a train is on the link</span>
+            </button>
+            <button class="onboard-chip" data-target="#planeBtn">
+              <span class="oc-name">Plane</span>
+              <span class="oc-desc">Elevator and flaps - the button is there while a plane is on the link</span>
             </button>
             <button class="onboard-chip" data-target="#wsSelect">
               <span class="oc-name">Workspace</span>
