@@ -34,8 +34,11 @@
 //                        evaluates its coverage check)
 //   carlito-bridge.html  same script tag. That page loads neither sloppycan.js nor j1939.js,
 //                        so every cross-module read here is typeof-guarded.
-//   j1939.js             J1939_DB += 0xF000 ERC1 / 0xFEAE AIR1 / 0xFEEA VW, and the VW entry on
-//                        J1939_REQ_SERVERS that answers a request for axle_load
+//   j1939-tables.js      J1939_DB += 0xF000 ERC1 / 0xFEAE AIR1 / 0xFEEA VW, and EBC1 / VDC2 /
+//                        TC1 / CCVS SPN 70 for the driver demand
+//   j1939.js             the VW entry on J1939_REQ_SERVERS that answers a request for
+//                        axle_load, and its demo sends j1939DriveFrames
+//   carlito.js           window.carlitoUplinkDecoders + carlitoUplinkOverrides (DRIVER DEMAND)
 //
 // Telemetry TX rides carlito.js's canForward gateway, which is what puts these on the wire and
 // in the dump as FW entries. No transport code here.
@@ -66,14 +69,14 @@
   function jfBlank() { return [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]; }
 
   // A scaled SPN, little-endian, in j1939DecodeSPN's own {b,n,f,o} vocabulary so the two are
-  // exact inverses. Non-finite input writes nothing and the 0xFF..FF default stands. The top two
-  // raw codes are reserved (0xFF..FE error, 0xFF..FF not available), so a real value clamps below
-  // them rather than colliding with one.
+  // exact inverses. Non-finite input writes nothing and the 0xFF..FF default stands. J1939-71
+  // Table 1 reserves every raw value whose top byte is above 0xFA, so a real value clamps to
+  // 0xFA, 0xFAFF, ... rather than colliding with an indicator, error or not-available code.
   function jfPut(d, b, n, val, f, o) {
     const v = Number(val);
     if (!Number.isFinite(v)) return;
-    const max = Math.pow(2, 8 * n) - 1;
-    let raw = Math.max(0, Math.min(max - 2, Math.round((v - (o || 0)) / f)));
+    const max = 0xFB * Math.pow(2, 8 * (n - 1)) - 1;
+    let raw = Math.max(0, Math.min(max, Math.round((v - (o || 0)) / f)));
     for (let i = 0; i < n; i++) { d[b + i] = raw % 256; raw = Math.floor(raw / 256); }
   }
   // A bit-level SPN. `bit` is the 0-based LSB position within byte `b`, matching j1939DecodeSPN -
@@ -194,12 +197,10 @@
   // value leaves through the uplink registry. A stalk has a position whether or not anyone is
   // touching it, so it is always sent, and its resting 0 is the game's own absent-default.
   //
-  // NO FRAME DRIVES IT. The real carrier is TSC1 (PGN 0, Torque/Speed Control 1) addressed to the
-  // driveline retarder at SA_RETARDER, its requested-torque field carrying the negative
-  // percentage. TSC1's field positions are J1939-71's: the ISOBUS Data Dictionary lists its SPNs
-  // with none, and the local copy of J1939-71 is a scanned image the tools here cannot read. A
-  // decoder written from memory is exactly what this file's primary-source rule forbids, so the
-  // stalk is panel-only until those positions come off the document.
+  // NO FRAME DRIVES IT YET. The real carrier is TSC1 (PGN 0, Torque/Speed Control 1) addressed to
+  // the driveline retarder at SA_RETARDER, its byte-4 SPN 518 Requested Torque/Torque Limit
+  // (1 %/bit, -125 offset) carrying the negative percentage under SPN 695's override mode. The
+  // layout is readable off J1939-71 (`pdftotext -layout`); the decoder is simply not written.
   const jfCmd = { retarder: 0 };
   window.carlitoUplinkSources = window.carlitoUplinkSources || {};
   Object.assign(window.carlitoUplinkSources, { retarder: () => jfCmd.retarder });
@@ -207,6 +208,156 @@
   window.j1939FlavorSetCtl = (p) => {
     if (p && 'retarder' in p) jfCmd.retarder = Math.max(0, Math.min(100, Math.round(Number(p.retarder)) || 0));
   };
+
+  // ── DRIVER DEMAND (contract accel / brake / steer / gear / handbrake, dir "in") ─
+  // The J1939 parameter groups that carry what the driver is doing, decoded off the bus into the
+  // uplink so a truck or tractor is driven by J1939 itself - the demo encodes the RAMN Control
+  // Panel into them (j1939.js), and anyone's tooling on a real bus drives the game the same way.
+  // Every field below was read off J1939-71 (the `-layout` table's SPN column is shifted a row;
+  // the SPNs pair with the bit positions IN ORDER):
+  //   61443 EEC2  50 ms.  byte 2 SPN 91 Accelerator Pedal Position 1, 0.4 %/bit.
+  //   61441 EBC1  100 ms. byte 2 SPN 521 Brake Pedal Position, 0.4 %/bit.
+  //   61449 VDC2  10 ms.  bytes 1-2 SPN 1807 Steering Wheel Angle, 1/1024 rad/bit, -31.374 rad,
+  //                       and "steered to the left results in a positive steering wheel angle".
+  //   256   TC1   50 ms when active, PDU1 to the transmission. byte 3 SPN 525 Requested Gear,
+  //                       1/bit, -125 offset, negative = reverse, 0 = neutral; 0xFB Park,
+  //                       0xFC Forward Drive, 0xFD Hold and the selector-position codes below it.
+  //   65265 CCVS  100 ms. 1.3 SPN 70 Parking Brake Switch, 00 not set / 01 set; 4.5 SPN 597
+  //                       Brake Switch -> `brakeLamp`, the rear stop lamps (the bridge owns that
+  //                       bit whenever it drives, so a pedal with no switch would brake unlit).
+  //
+  // NOT AVAILABLE REFRESHES NOTHING: a 1-byte raw of 251+, a 2-byte raw above 0xFAFF and a 2-bit
+  // 10/11 are the standard's error / not-available codes. That rule is also THE OWN-ADDRESS RULE
+  // here: isobus.js publishes EEC2 from the engine with SPN 91 left at 0xFF, so its echo reads as
+  // "no pedal"; nothing in sloppyCAN transmits EBC1, VDC2, TC1 or CCVS SPN 70 at all.
+  //
+  // FRESHNESS: every group is periodic, so one that stops arriving is withdrawn. JF_DRIVE_TTL_MS is
+  // this side's own timeout (three missed periods of the slowest group, isobus.js's rule), not a
+  // number out of the standard. A stale value returns undefined, so the uplink falls through to
+  // the RAMN state and then to omission - the game's keyboard fallback.
+  //
+  // FULL_LOCK_RAD is DECLARED CONFIGURATION, not a J1939 number: the steering-wheel angle that
+  // reads as the contract's full-lock 100 %. 1.5 turns each way.
+  const JF_DRIVE_TTL_MS = 300;
+  const FULL_LOCK_RAD = 1.5 * 2 * Math.PI;
+  const SA_ENGINE = 0x00;          // Engine #1 - EEC2's and (in the demo) CCVS's sender
+  const SA_TRANSMISSION = 0x03;    // Transmission #1 - TC1's destination
+  const SA_SHIFT_CONSOLE = 0x05;   // Shift Console - Primary (isobus.net SourceAddress table)
+  const PGN_EEC2 = 61443, PGN_EBC1 = 61441, PGN_VDC2 = 61449, PGN_TC1 = 256, PGN_CCVS = 65265;
+  const GEAR_R_BYTE = 0xFF;        // the contract's reverse byte
+  const jfDrive = {
+    accel:     { bus: undefined, at: 0 },
+    brake:     { bus: undefined, at: 0 },
+    steer:     { bus: undefined, at: 0 },
+    gear:      { bus: undefined, at: 0 },
+    handbrake: { bus: undefined, at: 0 },
+    brakeLamp: { bus: undefined, at: 0 },
+  };
+  const jfDriveFresh = (r) => r.bus !== undefined && Date.now() - r.at <= JF_DRIVE_TTL_MS;
+  function jfDriveHold(name, v) { const r = jfDrive[name]; r.bus = v; r.at = Date.now(); }
+
+  // PDU1 id: PS is the destination, not part of the PGN.
+  function jfIdDa(pgn, prio, sa, da) {
+    return ((((prio & 7) << 26) >>> 0) | (((pgn >>> 16) & 1) << 24) | (((pgn >>> 8) & 0xFF) << 16) |
+      ((da & 0xFF) << 8) | (sa & 0xFF)) >>> 0;
+  }
+  function jfParseId(id) {
+    const dp = (id >>> 24) & 1, pf = (id >>> 16) & 0xFF, ps = (id >>> 8) & 0xFF;
+    return { pgn: (dp << 16) | (pf << 8) | (pf < 0xF0 ? 0 : ps), da: pf < 0xF0 ? ps : 0xFF, sa: id & 0xFF };
+  }
+
+  // Contract gear byte -> SPN 525 raw, and back. Park reads as N: the parking brake is SPN 70's.
+  // The contract's byte 0 is "no gear opinion" to an automatic (D once the pedal is down), so a
+  // bus asking for Park or Neutral with a pedal still moves forward - the RAMN gear byte's rule,
+  // not this map's. Forward Drive maps to 1, which a MANUAL gearbox holds as first gear.
+  function jfGearRaw(g) {
+    if (g === 'R' || g === GEAR_R_BYTE) return 125 - 1;
+    const n = Math.round(Number(g)) || 0;
+    return 125 + Math.max(0, Math.min(6, n));
+  }
+  // A gear is the operating range, -64..64 (raw 61..189). Everything else is a parameter-specific
+  // code, and only Forward Drive and Park have a contract meaning; Hold, the shift requests and
+  // the selector positions refresh nothing. J1939-71's reserved list (0x00-0x3D) overlaps raw 61,
+  // the operating range's -64; the operating range wins here.
+  function jfGearFromRaw(raw) {
+    if (raw === 0xFC) return 1;            // Forward Drive position: a D intent
+    if (raw === 0xFB) return 0;            // Park
+    const g = raw - 125;
+    if (g < -64 || g > 64) return undefined;
+    if (g < 0) return GEAR_R_BYTE;
+    return Math.min(6, g);
+  }
+
+  // The four frames the demo sends for a control state { accel, brake, steer, gear } (RAMN panel
+  // shape: % / % / -100 L..+100 R / 1..6 or 'R'). The parking brake and brake switch ride a CCVS
+  // the demo already sends, so they are a patch onto its data rather than a frame of their own.
+  function j1939DriveFrames(c) {
+    const eec2 = jfBlank(), ebc1 = jfBlank(), vdc2 = jfBlank(), tc1 = jfBlank();
+    jfPut(eec2, 1, 1, Math.max(0, Math.min(100, Number(c.accel) || 0)), 0.4, 0);
+    jfPut(ebc1, 1, 1, Math.max(0, Math.min(100, Number(c.brake) || 0)), 0.4, 0);
+    const rad = -Math.max(-100, Math.min(100, Number(c.steer) || 0)) / 100 * FULL_LOCK_RAD;
+    jfPut(vdc2, 0, 2, rad, 1 / 1024, -31.374);
+    tc1[2] = jfGearRaw(c.gear);
+    return [
+      { id: jfId(PGN_EEC2, 3, SA_ENGINE), isExt: true, isRtr: false, dlc: 8, data: eec2 },
+      { id: jfId(PGN_EBC1, 6, SA_BRAKES), isExt: true, isRtr: false, dlc: 8, data: ebc1 },
+      { id: jfId(PGN_VDC2, 6, SA_BRAKES), isExt: true, isRtr: false, dlc: 8, data: vdc2 },
+      { id: jfIdDa(PGN_TC1, 3, SA_SHIFT_CONSOLE, SA_TRANSMISSION), isExt: true, isRtr: false, dlc: 8, data: tc1 },
+    ];
+  }
+  // Writes SPN 70 (1.3, from `handbrake`) and SPN 597 (4.5, the pedal is down) into CCVS data,
+  // leaving every neighbouring field as it was.
+  function j1939CcvsPatch(d, c) {
+    jfBits(d, 0, 2, 2, c.handbrake ? 1 : 0);
+    jfBits(d, 3, 4, 2, (Number(c.brake) || 0) > 0 ? 1 : 0);
+    return d;
+  }
+
+  const jfB = (d, i) => (d && i < d.length) ? (d[i] & 0xFF) : 0xFF;
+  function jfDecodeDrive(frame) {
+    if (!frame.isExt || frame.isRtr || !frame.data) return;
+    const { pgn, da } = jfParseId(frame.id >>> 0);
+    const d = frame.data;
+    if (pgn === PGN_EEC2) {
+      const r = jfB(d, 1);
+      if (r <= 250) jfDriveHold('accel', Math.min(100, r * 0.4));
+    } else if (pgn === PGN_EBC1) {
+      const r = jfB(d, 1);
+      if (r <= 250) jfDriveHold('brake', Math.min(100, r * 0.4));
+    } else if (pgn === PGN_VDC2) {
+      const r = jfB(d, 0) | (jfB(d, 1) << 8);
+      if (r > 0xFAFF) return;
+      const rad = r / 1024 - 31.374;
+      jfDriveHold('steer', Math.max(-100, Math.min(100, -rad / FULL_LOCK_RAD * 100)));
+    } else if (pgn === PGN_TC1) {
+      if (da !== SA_TRANSMISSION && da !== 0xFF) return;
+      const g = jfGearFromRaw(jfB(d, 2));
+      if (g !== undefined) jfDriveHold('gear', g);
+    } else if (pgn === PGN_CCVS) {
+      const p = (jfB(d, 0) >> 2) & 3;
+      if (p <= 1) jfDriveHold('handbrake', p);
+      const b = (jfB(d, 3) >> 4) & 3;
+      if (b <= 1) jfDriveHold('brakeLamp', b);
+    }
+  }
+  window.carlitoUplinkDecoders = window.carlitoUplinkDecoders || [];
+  window.carlitoUplinkDecoders.push(jfDecodeDrive);
+
+  // A CLAIM, not a home: these signals belong to the RAMN state in carlito.js,
+  // so a bus value that is live takes them over and a stale one hands them straight back. Claims
+  // COMPOSE - an earlier registrant's entry is asked first (drone.js composes the other way round,
+  // so the Drone Control panel wins whichever file loads first).
+  window.carlitoUplinkOverrides = window.carlitoUplinkOverrides || {};
+  const jfClaim = (name) => jfDriveFresh(jfDrive[name]) ? jfDrive[name].bus : undefined;
+  for (const name of Object.keys(jfDrive)) {
+    const prev = window.carlitoUplinkOverrides[name];
+    const mine = () => jfClaim(name);
+    window.carlitoUplinkOverrides[name] = prev
+      ? (st) => { const v = prev(st); return v !== undefined ? v : mine(); }
+      : mine;
+  }
+  window.j1939DriveFrames = j1939DriveFrames;
+  window.j1939CcvsPatch = j1939CcvsPatch;
 
   // ── Self-test ───────────────────────────────────────────────────────────────
   // Run from the console: window.j1939FlavorSelfTest(). Covers the things that are easy to get
@@ -251,8 +402,8 @@
       'FF FF 64 FF FF FF FF FF');
     eq('a real zero is written', hex(jfAir1({ air_primary: 0, air_secondary: 0 }).data),
       'FF FF 00 00 FF FF FF FF');
-    //    ...and a value past the top of the scale clamps BELOW the two reserved codes.
-    eq('over-range clamps under the reserved codes', jfAir1({ air_primary: 9999 }).data[2], 0xFD);
+    //    ...and a value past the top of the scale clamps to the top of the valid range.
+    eq('over-range clamps under the reserved codes', jfAir1({ air_primary: 9999 }).data[2], 0xFA);
 
     // 4. The on-request half, which lives in j1939.js but is this flavor's coverage. Only
     //    checked where that module is loaded - and said out loud when it is not, because a
@@ -292,6 +443,58 @@
         { 'Service Brake Air Pressure Circuit #1': '800 kPa',
           'Service Brake Air Pressure Circuit #2': '720 kPa' });
     }
+
+    // 6. Driver demand. The decoder writes live state, so it is saved and restored around the test.
+    const saved = JSON.stringify(jfDrive);
+    const feed = (frames) => frames.forEach(jfDecodeDrive);
+    const live = (n) => jfDriveFresh(jfDrive[n]) ? jfDrive[n].bus : undefined;
+    const [eec2, ebc1, vdc2, tc1] = j1939DriveFrames({ accel: 40, brake: 100, steer: -100, gear: 'R' });
+    eq('EEC2 id', eec2.id.toString(16).toUpperCase(), 'CF00300');
+    eq('TC1 id is PDU1 to the transmission', tc1.id.toString(16).toUpperCase(), 'C010305');
+    //    40 % -> 100 = 0x64 at byte 2; 100 % -> 250 = 0xFA; R -> -1 -> 124 = 0x7C at byte 3.
+    eq('EEC2 40 % pedal', hex(eec2.data), 'FF 64 FF FF FF FF FF FF');
+    eq('EBC1 full brake', hex(ebc1.data), 'FF FA FF FF FF FF FF FF');
+    eq('TC1 reverse', hex(tc1.data), 'FF FF 7C FF FF FF FF FF');
+    //    Full LEFT is a POSITIVE wheel angle: (+9.4248 + 31.374) * 1024 = 41777.8 -> 41778 = 0xA332.
+    eq('VDC2 full left is positive', hex(vdc2.data), '32 A3 FF FF FF FF FF FF');
+    feed([eec2, ebc1, vdc2, tc1]);
+    eq('decoded accel', Math.round(live('accel')), 40);
+    eq('decoded brake', live('brake'), 100);
+    eq('decoded steer (left is negative in the contract)', Math.round(live('steer')), -100);
+    eq('decoded gear R', live('gear'), 0xFF);
+    feed(j1939DriveFrames({ gear: 3 }).slice(3));
+    eq('decoded gear 3', live('gear'), 3);
+    //    Not available refreshes nothing: isobus.js's EEC2 (SPN 91 = 0xFF) must not zero the pedal.
+    jfDecodeDrive({ id: jfId(PGN_EEC2, 3, SA_ENGINE), isExt: true, data: [0xFF, 0xFF, 42, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF] });
+    eq('an EEC2 with SPN 91 not available leaves the pedal', Math.round(live('accel')), 40);
+    //    Park and Forward Drive; a Hold refreshes nothing.
+    const tcRaw = (raw) => jfDecodeDrive({ id: jfIdDa(PGN_TC1, 3, SA_SHIFT_CONSOLE, SA_TRANSMISSION), isExt: true, data: [0xFF, 0xFF, raw, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF] });
+    tcRaw(0xFC); eq('Forward Drive reads D', live('gear'), 1);
+    tcRaw(0xFB); eq('Park reads N', live('gear'), 0);
+    tcRaw(0xFD); eq('Hold refreshes nothing', live('gear'), 0);
+    //    A TC1 to another destination is not the transmission's.
+    jfDecodeDrive({ id: jfIdDa(PGN_TC1, 3, SA_SHIFT_CONSOLE, 0x04), isExt: true, data: [0xFF, 0xFF, 128, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF] });
+    eq('TC1 to Transmission #2 ignored', live('gear'), 0);
+    //    SPN 70 in bits 3-4 of CCVS byte 1 and SPN 597 in bits 5-6 of byte 4, neighbours untouched.
+    eq('CCVS switches', hex(j1939CcvsPatch(jfBlank(), { handbrake: 1, brake: 30 })), 'F7 FF FF DF FF FF FF FF');
+    jfDecodeDrive({ id: jfId(PGN_CCVS, 6, SA_ENGINE), isExt: true, data: [0xF7, 0, 0, 0x10, 0, 0, 0, 0] });
+    eq('decoded handbrake', live('handbrake'), 1);
+    eq('decoded brake switch', live('brakeLamp'), 1);
+    jfDecodeDrive({ id: jfId(PGN_CCVS, 6, SA_ENGINE), isExt: true, data: [0xFF, 0, 0, 0, 0, 0, 0, 0] });
+    eq('CCVS with SPN 70 not available leaves it', live('handbrake'), 1);
+    //    A withdrawn group expires, and the claim then declines.
+    jfDrive.accel.at = Date.now() - JF_DRIVE_TTL_MS - 1;
+    eq('stale pedal declines the claim', jfClaim('accel'), undefined);
+    //    Round-trip through j1939.js's decoder, where it is loaded.
+    if (typeof j1939DecodePGN === 'function') {
+      const dec = (pgn, data, name) => (j1939DecodePGN(pgn, data).find(x => x.name === name) || {}).display;
+      eq('EBC1 round trip', String(dec(PGN_EBC1, ebc1.data, 'Brake Pedal Position')).replace(/ /g, ' '), '100 %');
+      eq('VDC2 round trip', String(dec(PGN_VDC2, vdc2.data, 'Steering Wheel Angle')).replace(/ /g, ' '), '9.425 rad');
+      eq('TC1 round trip', dec(PGN_TC1, tc1.data, 'Requested Gear'), '-1');
+      eq('CCVS round trip', dec(PGN_CCVS, [0xF7, 0, 0, 0x10, 0, 0, 0, 0], 'Parking Brake Switch'), 'Set');
+      eq('CCVS brake switch round trip', dec(PGN_CCVS, [0xF7, 0, 0, 0x10, 0, 0, 0, 0], 'Brake Switch'), 'On');
+    }
+    Object.assign(jfDrive, JSON.parse(saved));
 
     if (failures.length) console.error('J1939 flavor self-test: ' + failures.length + ' failure(s)\n' + failures.join('\n'));
     else console.log('J1939 flavor self-test: all checks passed.');

@@ -333,9 +333,10 @@
   // to prevent. Same rule the game's own arbitration uses: while the bridge is fresh it owns
   // the vehicle outright, and when it goes stale the local controls are simply back.
   //
-  // Only one panel may claim a signal at a time; nothing enforces that, because two panels
-  // claiming the same axis is two control surfaces on one aircraft, which is a design mistake
-  // rather than a race.
+  // A registry entry is ONE function per signal, so a second claimant composes with the first
+  // (wraps it, and asks whichever should win first) rather than assigning over it: drone.js's
+  // sticks and j1939-flavor.js's bus driver demand both claim accel/brake/steer, and the panel in
+  // hand wins.
   const UPLINK_OVERRIDES = window.carlitoUplinkOverrides || {};
   const inSource = (name) => UPLINK_OVERRIDES[name] || IN_SOURCES[name] || MODULE_IN_SOURCES[name];
 
@@ -426,9 +427,8 @@
     if (extra.length) console.warn('Carlito: OUT fields not declared "in" by the contract: ' + extra.join(', '));
     // The inverse: declared "in" signals with no source. console.INFO, not warn, DELIBERATELY -
     // what is left is a known list, not a fault, and a warn on every page load would train
-    // everyone to ignore it. In the full app that is the boat's `rudder` (steered on the RAMN
-    // steer axis, which the game accepts as the rudder). carlito-bridge.html adds the ones whose
-    // owning module it does not load: the DM1 and trailer lamps (j1939.js), the boat's `sheet`
+    // everyone to ignore it. The full app sources every one; carlito-bridge.html lists the ones
+    // whose owning module it does not load: the DM1 and trailer lamps (j1939.js), the boat's `sheet`
     // (boat-pilot.js), the train's `pantograph`/`doors` (train.js) and the plane's
     // `elevator`/`flaps` (plane.js). Everything else is sourced by a module rather than by RAMN
     // state - see the four registries.

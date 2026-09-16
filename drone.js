@@ -286,13 +286,21 @@
   // turns with the other, which is what drone.gd's Vector2(tilt, 0) says.
   const stick = { pitch: 0, yaw: 0 };   // -100..100, pitch + = nose forward
   const flying = () => ctrlOpen() && droneLive;
+  // Claims COMPOSE: this panel is asked first and an earlier registrant's claim (j1939-flavor.js's
+  // bus driver demand) answers when it declines.
   window.carlitoUplinkOverrides = window.carlitoUplinkOverrides || {};
-  Object.assign(window.carlitoUplinkOverrides, {
+  const claims = {
     accel: () => flying() ? Math.max(0, stick.pitch) : undefined,
     brake: () => flying() ? Math.max(0, -stick.pitch) : undefined,
     steer: () => flying() ? stick.yaw : undefined,
     key:   () => flying() ? ctrlKey : undefined,
-  });
+  };
+  for (const [name, mine] of Object.entries(claims)) {
+    const prev = window.carlitoUplinkOverrides[name];
+    window.carlitoUplinkOverrides[name] = prev
+      ? (st) => { const v = mine(st); return v !== undefined ? v : prev(st); }
+      : mine;
+  }
 
   // ── Dashboard window DOM ────────────────────────────────────────────────────
   const dashWin = document.createElement('div');

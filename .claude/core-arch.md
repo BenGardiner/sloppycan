@@ -2,7 +2,7 @@
 
 ## Files & load order
 
-`index.html` loads scripts in this order: the bolt-on modules (`j1939.js` … `carlito.js`, all
+`index.html` loads scripts in this order: the bolt-on modules (`j1939-tables.js`, `j1939.js` … `carlito.js`, all
 `defer`), then **`can-link.js`** (non-defer), **`diag-parse.js`** (non-defer), then
 **`sloppycan.js`** (non-defer). Non-defer scripts run during parse, before the deferred modules,
 and share one global lexical scope. So `can-link.js` + `diag-parse.js` evaluate immediately

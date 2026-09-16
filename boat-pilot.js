@@ -2,11 +2,9 @@
 // The commanded half boat.js deliberately left out: boat.js's own header says outright that
 // `sheet` / `rudder` / `nav_mode` / `heading_cmd` belong to "an autopilot control head", because
 // boat.js is TELEMETRY ONLY and none of those four has a telemetry echo worth drawing a widget
-// over. This is that control head, but only for THREE of the four: `rudder` is deliberately
-// left unsourced here too, exactly as it is everywhere else on this side today (carlito.js's own
-// checkOutFields note lists it among the controls with no sloppyCAN source built yet) - the boat
-// is steered on the RAMN 'steer' axis, which InputRouter's own arbitration already accepts as the
-// rudder command when 'rudder' itself is absent, so nothing is lost by not sourcing it.
+// over. This is that control head, but only for THREE of the four: `rudder` is nmea2000.js's,
+// decoded off PGN 127245's rudder order, and otherwise the boat is steered on the RAMN 'steer'
+// axis, which InputRouter's own arbitration accepts as the rudder command when 'rudder' is absent.
 //
 // `sheet` is OWNED here: this window sources it into window.carlitoUplinkSources, permanently
 // rather than as a claim, because nothing else on this side sources it (the carlito.js

@@ -63,14 +63,14 @@
 
   // A scaled unsigned SPN, little-endian, in j1939DecodeSPN's own {b,n,f,o} vocabulary so the
   // two are exact inverses. Non-finite input writes nothing and the 0xFF..FF default stands.
-  // The top two raw codes are reserved (0xFF..FE error, 0xFF..FF not available), so a real
-  // value clamps below them rather than colliding with one.
+  // J1939-71 Table 1 reserves every raw value whose top byte is above 0xFA, so a real value
+  // clamps to 0xFA, 0xFAFF, ... rather than colliding with an indicator, error or N/A code.
   function ibPut(d, b, n, val, f, o) {
     const v = Number(val);
     if (!Number.isFinite(v)) return;
-    const max = Math.pow(2, 8 * n) - 1;
+    const max = 0xFB * Math.pow(2, 8 * (n - 1)) - 1;
     let raw = Math.round((v - (o || 0)) / f);
-    raw = Math.max(0, Math.min(max - 2, raw));
+    raw = Math.max(0, Math.min(max, raw));
     for (let i = 0; i < n; i++) { d[b + i] = raw % 256; raw = Math.floor(raw / 256); }
   }
   // A bit-level SPN. `bit` is the 0-based LSB position within byte `b`, matching
@@ -384,10 +384,10 @@
   // transmits none of the three command PGNs, only the status groups that answer them.
   //
   // `diff_lock` AND `fwd_drive` ARE PANEL-ONLY. The rear diff lock's real carrier is J1939 TC1
-  // (PGN 256), SPN 687 Disengage Differential Lock Request - Rear Axle 1, but TC1's field
-  // positions are J1939-71's: the Data Dictionary lists the SPN with none, and the local J1939-71
-  // is a scanned image the tools here cannot read. MFWD has no command in the ISO 11783-7
-  // messages decoded here (FWD, 64991, is the status this file packs).
+  // (PGN 256), SPN 687 Disengage Differential Lock Request - Rear Axle 1, at 4.5 per J1939-71
+  // (j1939-flavor.js already decodes TC1's Requested Gear); that decoder is simply not written.
+  // MFWD has no command in the ISO 11783-7 messages decoded here (FWD, 64991, is the status this
+  // file packs).
   const IB_CMD_TTL_MS = 300;
   const IB_PGN_HPTOC = 65090;   // Hitch and PTO commands, prio 3, 100 ms when active
   const IB_PGN_GSC   = 44288;   // Agricultural Guidance System command, PDU1 to the TECU, 100 ms
@@ -543,8 +543,8 @@
       hex(ibWbsd({ wheel_speed: 18 }).data), '88 13 FF FF FF FF FF FF');
     eq('a real key-off status still says off',
       hex(ibWbsd({ wheel_speed: 18, status: 0 }).data), '88 13 FF FF FF FF FF F1');
-    //    ...and a value past the top of the scale clamps BELOW the two reserved codes.
-    eq('over-range clamps under the reserved codes', ibEec2({ engine_load: 9999 }).data[2], 0xFD);
+    //    ...and a value past the top of the scale clamps to the top of the valid range.
+    eq('over-range clamps under the reserved codes', ibEec2({ engine_load: 9999 }).data[2], 0xFA);
 
     // 4. The NAME. Tillage (device class 2), agriculture (industry group 2), self-configurable.
     const nm = ibName(2);

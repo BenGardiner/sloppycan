@@ -147,20 +147,23 @@
   // One table, one rule: a protocol view asks for its machine when the user SELECTS that protocol.
   // The DroneCAN tab holds one protocol, so showing it is the selection; the J1939 tab holds three,
   // so its MODE BUTTON is - a tab opened to read frames must not offer to restart a drive.
-  // None of these traffics carries driving controls, so the game falls back to its own keyboard
-  // for accel/brake/steer; the RAMN controls stay dark until RAMN traffic is back. The drone is
-  // the exception while Drone Control is open, since its sticks claim those axes.
-  const KEYBOARD_DRIVES = ' Under this traffic the machine is driven from the game’s own keyboard' +
-                          ' - the RAMN controls need RAMN traffic.';
+  // The J1939 traffics carry the RAMN Control Panel as J1939 driver-demand groups
+  // (j1939-flavor.js); NMEA 2000 carries only its steer, as a rudder order, so the game's keyboard
+  // drives the throttle; DroneCAN carries none, and the drone flies from Drone Control or falls
+  // back to the keyboard.
+  const J1939_DRIVES = ' Under this traffic the RAMN Control Panel drives it through J1939 frames' +
+                       ' (EEC2 / EBC1 / VDC2 / TC1 / CCVS).';
   const PROTO_PANEL = {
     dronecan: ['drone', 'The DroneCAN tab decodes the drone’s bus, and a car publishes none of it.' +
                         ' Fly it from Drone Control, or from the game’s own keyboard while that is' +
                         ' closed - the RAMN controls need RAMN traffic.'],
     j1939:    ['truck', 'The J1939 tab decodes a heavy truck’s bus - engine, retarder, air ' +
-                        'reservoirs and the trailer’s ISO 11992 link.' + KEYBOARD_DRIVES],
+                        'reservoirs and the trailer’s ISO 11992 link.' + J1939_DRIVES],
     iso11783: ['tractor', 'ISO 11783 is the tractor-implement bus: hitch, PTO, wheel and ground ' +
-                          'speed, and the implement’s own address claim.' + KEYBOARD_DRIVES],
-    nmea2000: ['boat', 'NMEA 2000 is a marine bus - heading, rudder and trim.' + KEYBOARD_DRIVES],
+                          'speed, and the implement’s own address claim.' + J1939_DRIVES],
+    nmea2000: ['boat', 'NMEA 2000 is a marine bus - heading, rudder and trim. Under this traffic ' +
+                       'the RAMN Control Panel’s steer orders the rudder (PGN 127245) and the ' +
+                       'game’s own keyboard drives the throttle.'],
   };
   function requestForProto(mode) {
     const m = PROTO_PANEL[mode];

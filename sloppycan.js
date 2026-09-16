@@ -2810,13 +2810,15 @@ function demoSetBaseTraffic(kind) {
 }
 
 // Display label for a demoBaseTraffic kind, for the RAMN Control Panel's off note.
-function demoBaseTrafficLabel(kind) {
+function demoTrafficLabel(kind) {
   return kind === 'nmea2000' ? 'NMEA 2000' : kind === 'iso11783' ? 'ISO 11783' :
     kind === 'chademo' ? 'CHAdeMO' : kind === 'canopen' ? 'CANopen' :
     kind === 'dronecan' ? 'DroneCAN' : kind === 'j1939' ? 'J1939' : 'RAMN';
 }
 window.demoGetBaseTraffic = () => demoBaseTraffic;
-window.demoBaseTrafficLabel = () => demoBaseTrafficLabel(demoBaseTraffic);
+// A different name from the window accessor: a top-level function IS a window property, so
+// assigning window.demoBaseTrafficLabel over it would make the accessor call itself.
+window.demoBaseTrafficLabel = () => demoTrafficLabel(demoBaseTraffic);
 
 // Prompt the user before changing demo base traffic. Returns true if the requested
 // kind is (now) the active base traffic. No-op outside demo mode.

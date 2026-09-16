@@ -18,10 +18,10 @@
 // ── THE COMMANDS, AND WHAT IS NOT HERE ───────────────────────────────────────
 // `nav_mode` and `heading_cmd` are contract dir="in" signals this file OWNS: boat-pilot.js's
 // control head is a view over them, and a PGN 127237 from another address drives them too - see
-// "The autopilot COMMANDS" below. `rudder` is the one dir="in" boat signal nothing sources: its
-// real carrier is PGN 127245 Rudder (the same frame this file's OUT half builds for
-// `rudder_actual`), and the boat is steered on the RAMN steer axis, which the game accepts as
-// the rudder when `rudder` is absent.
+// "The autopilot COMMANDS" below. `rudder` is this file's too, decoded off PGN 127245 Rudder's
+// Angle Order (the same frame this file's OUT half builds for `rudder_actual`, which leaves the
+// order unavailable) - see "The rudder ORDER" below. Absent that, the boat is steered on the RAMN
+// steer axis, which the game accepts as the rudder when `rudder` is absent.
 //
 // `sheet` and `sail_angle` are NOT this file's signals either, and for a different reason: NMEA
 // 2000 defines no sail PGN at all, so this file has no flavor to belong to for either one.
@@ -139,6 +139,7 @@
   const SA_HELM   = 1;
   const SA_NAV    = 2;
   const SA_TANK   = 3;
+  const SA_STEER_HEAD = 4;   // the demo's steering control head, which orders rudder angles
 
   // Full rudder throw, in degrees, for converting the contract's `rudder`/`rudder_actual`
   // PERCENTAGE onto PGN 127245's Position/Angle Order fields, which are real angles. 35 degrees
@@ -308,6 +309,7 @@
     const out = [];
     const now = Date.now();
 
+    if (has(t, 'rudder_actual')) nfBoatAt = now;   // a boat is on the link (the rudder order's gate)
     if (slow) {                                                          // ~100 ms
       if (has(t, 'rudder_actual')) out.push(nfRudder(t));
       if (has(t, 'trim')) out.push(nfEngineRapid(t));
@@ -400,11 +402,52 @@
     return st.bytes.slice(0, st.total);
   }
 
+  // ── The rudder ORDER (contract `rudder`, dir "in") ────────────────────────────
+  // PGN 127245 bytes 3-4, Angle Order, 0.0001 rad signed, 0x7FFF not available (0x7FFE out of
+  // range), converted to the contract's percentage through RUDDER_MAX_DEG - the exact inverse of
+  // nfRudder's Position. 127245 is periodic (100 ms), so an order that stops arriving is
+  // withdrawn after NF_RUDDER_TTL_MS, this side's own three missed periods.
+  //
+  // PRESENCE: the game lets a present `rudder` override `steer` for ANY vehicle, so the source
+  // also requires a boat on the link - nfPack stamps nfBoatAt whenever the telemetry carries
+  // `rudder_actual` - or an order on the bus would steer a car.
+  //
+  // THE OWN-ADDRESS RULE: this file publishes 127245 from SA_HELM, with the order unavailable, so
+  // SA_HELM is skipped on both counts.
+  const NF_RUDDER_TTL_MS = 300;
+  const NF_BOAT_GATE_MS = 300;   // a few telemetry ticks: a boat -> car swap must not steer the car
+  let nfBoatAt = 0;
+  const nfRudderOrder = { bus: undefined, at: 0 };
+  function nfRudderLive() {
+    const now = Date.now();
+    if (now - nfBoatAt > NF_BOAT_GATE_MS) return undefined;
+    if (nfRudderOrder.bus === undefined || now - nfRudderOrder.at > NF_RUDDER_TTL_MS) return undefined;
+    return nfRudderOrder.bus;
+  }
+  // The demo's order frame for a steer percentage (-100 port .. +100 starboard), from the
+  // steering control head. Direction Order follows the sign.
+  function nfRudderOrderFrame(pct) {
+    const d = nfBlank(8);
+    const p = Math.max(-100, Math.min(100, Number(pct) || 0));
+    nfBits(d, 1, 0, 3, p > 0 ? 1 : p < 0 ? 2 : 0);
+    nfPut(d, 2, 2, p / 100 * RUDDER_MAX_DEG, NF_ANG, 0, true);
+    return nfFrame(NF_MSGS.RUDDER.pgn, NF_MSGS.RUDDER.prio, SA_STEER_HEAD, d);
+  }
+
   function nfDecodeCommand(frame) {
     if (!frame.isExt || frame.isRtr || !frame.data || !frame.data.length) return;
     const id = frame.id >>> 0;
     const pgn = (((id >>> 24) & 1) << 16) | (((id >>> 16) & 0xFF) << 8) | ((id >>> 8) & 0xFF);
     const sa = id & 0xFF;
+    if (pgn === NF_MSGS.RUDDER.pgn) {
+      if (sa === NF_MSGS.RUDDER.sa || frame.data.length < 4) return;
+      let raw = (frame.data[2] & 0xFF) | ((frame.data[3] & 0xFF) << 8);
+      if (raw >= 0x7FFE && raw <= 0x7FFF) return;
+      if (raw >= 0x8000) raw -= 0x10000;
+      nfRudderOrder.bus = Math.max(-100, Math.min(100, raw * NF_ANG / RUDDER_MAX_DEG * 100));
+      nfRudderOrder.at = Date.now();
+      return;
+    }
     if (pgn !== NF_MSGS.HTC.pgn || sa === NF_MSGS.HTC.sa) return;
     const p = nfFastPacketFeed(sa, Array.from(frame.data, b => b & 0xFF));
     if (!p) return;
@@ -424,7 +467,9 @@
   Object.assign(window.carlitoUplinkSources, {
     nav_mode:    () => nfPilot.navMode,
     heading_cmd: () => (nfPilot.headingCmd === null ? undefined : nfPilot.headingCmd),
+    rudder:      nfRudderLive,
   });
+  window.nmea2000RudderOrderFrame = nfRudderOrderFrame;   // <- j1939.js's NMEA 2000 demo
   window.nmea2000PilotCtl = () => ({ navMode: nfPilot.navMode, headingCmd: nfPilot.headingCmd });
   window.nmea2000SetPilot = (p) => {
     if (!p) return;
@@ -530,6 +575,26 @@
     nfDecodeCommand(fps[0]); nfDecodeCommand(fps[2]);
     eq('a frame out of sequence drops the transfer', [nfPilot.navMode, nfPilot.headingCmd], [0, 90]);
     Object.assign(nfPilot, savedPilot);
+
+    // 7. The rudder order: 17.5 deg starboard (50 %) from the control head reads back as 50 %,
+    //    only while a boat is on the link; the helm's own 127245 is skipped; a stale order declines.
+    const savedOrder = Object.assign({}, nfRudderOrder), savedBoat = nfBoatAt;
+    nfRudderOrder.bus = undefined;
+    const ord = nfRudderOrderFrame(50);
+    //    17.5 deg = 0.30543 rad -> 3054 = 0x0BEE; Direction Order 1 = starboard.
+    eq('rudder order frame', hex(ord.data), 'FF F9 EE 0B FF FF FF FF');
+    nfDecodeCommand(ord);
+    nfBoatAt = 0;
+    eq('no boat on the link, no rudder', nfRudderLive(), undefined);
+    nfBoatAt = Date.now();
+    eq('a boat on the link takes the order', Math.round(nfRudderLive()), 50);
+    nfDecodeCommand(nfRudderOrderFrame(-100));
+    eq('full port is -100', Math.round(nfRudderLive()), -100);
+    nfDecodeCommand(nfRudder({ rudder_actual: 20 }));
+    eq('its own helm 127245 is not an order', Math.round(nfRudderLive()), -100);
+    nfRudderOrder.at = Date.now() - NF_RUDDER_TTL_MS - 1;
+    eq('a withdrawn order declines', nfRudderLive(), undefined);
+    Object.assign(nfRudderOrder, savedOrder); nfBoatAt = savedBoat;
 
     if (failures.length) console.error('NMEA 2000 flavor self-test: ' + failures.length + ' failure(s)\n' + failures.join('\n'));
     else console.log('NMEA 2000 flavor self-test: all checks passed.');

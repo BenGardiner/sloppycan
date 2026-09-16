@@ -106,9 +106,7 @@ function obdDecode(bytes) {
       for (let i = 1; i + 1 < bytes.length; i += 2) {
         const w = (bytes[i] << 8) | bytes[i+1];
         if (w === 0) continue;
-        const prefix = ['P','C','B','U'][(w >> 14) & 3];
-        dtcs.push(prefix + ((w >> 12) & 3).toString() + ((w >> 8) & 0xF).toString(16).toUpperCase()
-                  + ((w >> 4) & 0xF).toString(16).toUpperCase() + (w & 0xF).toString(16).toUpperCase());
+        dtcs.push(obdDtcCode(w).code);
       }
       if (dtcs.length) rows.push({ k:'DTCs', v:dtcs.join('  '), vHtml:dtcs.map(c => dtcLink(c, `q=${c}&fmt=obdcode`)).join('  ') });
       else add('DTCs', 'none');
@@ -213,8 +211,18 @@ const UDS_DDDI_SF = {0x01:'defineByIdentifier',0x02:'defineByMemoryAddress',0x03
 
 function udsH(v,w=2){ return '0x'+v.toString(16).toUpperCase().padStart(w,'0'); }
 function udsBytesHex(b){ return b.map(v=>v.toString(16).toUpperCase().padStart(2,'0')).join(' '); }
-function udsDTC(a,b,c){ const p=['P','C','B','U'][(a>>6)&3]; return p+[((a>>4)&3),(a&0xF),(b>>4),(b&0xF),(c>>4),(c&0xF)].map(n=>n.toString(16).toUpperCase()).join('')+'  ('+udsBytesHex([a,b,c])+')'; }
-function udsDTCStatus(s){ return ['testFailed','testFailedThisMonitoringCycle','pendingDTC','confirmedDTC','testNotCompletedSinceLastClear','testFailedSinceLastClear','testNotCompletedThisMonitoringCycle','warningIndicatorRequested'].filter((_,i)=>s&(1<<i)).join(', ')||'none'; }
+// Structural DTC decoding, split out so explainers/dtc.html (loads this file) gets the same
+// letter/nibble split and status-bit names as structured data instead of re-deriving them.
+// udsDTC/udsDTCStatus/the obdDecode DTC-list loop below are just string formatters over these.
+const OBD_DTC_LETTERS = ['P','C','B','U'];
+const UDS_DTC_STATUS_NAMES = ['testFailed','testFailedThisMonitoringCycle','pendingDTC','confirmedDTC','testNotCompletedSinceLastClear','testFailedSinceLastClear','testNotCompletedThisMonitoringCycle','warningIndicatorRequested'];
+// 2-byte OBD-II / SAE J2012 DTC word -> {letter, firstDigit, code}. code is the 5-char form (e.g. "P0301").
+function obdDtcCode(w){ const letter=OBD_DTC_LETTERS[(w>>14)&3],firstDigit=(w>>12)&3; return {letter,firstDigit,code:letter+firstDigit+[(w>>8)&0xF,(w>>4)&0xF,w&0xF].map(n=>n.toString(16).toUpperCase()).join('')}; }
+// 3-byte UDS / ISO 14229-1 DTC -> {letter, firstDigit, nibbles, code4, fullCode}. code4 is the OBD-style
+// 5-char form (for DTC_DB lookup); fullCode is the 7-char UDS display form.
+function udsDtcCode(a,b,c){ const letter=OBD_DTC_LETTERS[(a>>6)&3],nibbles=[(a>>4)&3,a&0xF,b>>4,b&0xF,c>>4,c&0xF].map(n=>n.toString(16).toUpperCase()); return {letter,firstDigit:(a>>4)&3,nibbles,code4:letter+nibbles.slice(0,4).join(''),fullCode:letter+nibbles.join('')}; }
+function udsDTC(a,b,c){ return udsDtcCode(a,b,c).fullCode+'  ('+udsBytesHex([a,b,c])+')'; }
+function udsDTCStatus(s){ return UDS_DTC_STATUS_NAMES.filter((_,i)=>s&(1<<i)).join(', ')||'none'; }
 // Deep-link a decoded DTC to the standalone dtc.html decoder.
 function dtcLink(label,qs){ return `<a href="explainers/dtc.html?${qs}" target="_blank" style="color:var(--blue);text-decoration:none">${escHtml(label)} ↗</a>`; }
 function dtcHexQ(arr){ return arr.map(b=>b.toString(16).toUpperCase().padStart(2,'0')).join('+'); }

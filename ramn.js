@@ -136,7 +136,7 @@
 .ramn-joypad button.on { background:var(--green-dim); color:var(--green); border-color:transparent; }
 /* Traffic off: the simulated frames stop, so the controls that feed them grey out. */
 .ramn-header .ramn-dot.ctrl.off { background:var(--text3); }
-.ramn-ctrl-off .ramn-sec:not(.ramn-traffic-sec) { opacity:.35; pointer-events:none; }
+.ramn-ctrl-off .ramn-sec:not(.ramn-traffic-sec), .ramn-sec.ramn-sec-off { opacity:.35; pointer-events:none; }
 .ramn-base-note { margin-top:6px; font-size:10px; color:var(--amber); }
 .ramn-hint {
   margin-top:6px; padding-top:9px; border-top:1px solid var(--border);
@@ -334,19 +334,19 @@ ctrlWin.innerHTML = `
       <div class="ramn-toggle" id="ramnCtrlTraffic" title="Stop / resume the simulated RAMN frames. While stopped, the RAMN dashboard and Carlito read only the frames you send yourself. Turned off automatically when a Carlito challenge starts and back on when it ends.">Disable traffic</div>
       <div class="ramn-base-note" id="ramnCtrlBaseNote" style="display:none;"></div>
     </div>
-    <div class="ramn-sec">
+    <div class="ramn-sec" data-ctl="brake">
       <div class="ramn-sec-lbl"><span>Brake</span><span class="v" id="ramnCtrlBrakeV">0%</span></div>
       <input type="range" class="ramn-range brake" id="ramnCtrlBrake" min="0" max="100" value="0">
     </div>
-    <div class="ramn-sec">
+    <div class="ramn-sec" data-ctl="accel">
       <div class="ramn-sec-lbl"><span>Accel</span><span class="v" id="ramnCtrlAccelV">0%</span></div>
       <input type="range" class="ramn-range accel" id="ramnCtrlAccel" min="0" max="100" value="0">
     </div>
-    <div class="ramn-sec">
+    <div class="ramn-sec" data-ctl="steer">
       <div class="ramn-sec-lbl"><span>Steer</span><span><button class="ramn-mini" id="ramnCtrlCentre">Centre</button> <span class="v" id="ramnCtrlSteerV">C 0%</span></span></div>
       <input type="range" class="ramn-range steer" id="ramnCtrlSteer" min="-100" max="100" value="0">
     </div>
-    <div class="ramn-sec">
+    <div class="ramn-sec" data-ctl="gear">
       <div class="ramn-sec-lbl"><span>Shift joystick</span><span class="v" id="ramnCtrlGearV">Gear 1</span></div>
       <div class="ramn-joypad" id="ramnCtrlJoy">
         <button class="sp"></button><button data-joy="2">↑</button><button class="sp"></button>
@@ -354,19 +354,19 @@ ctrlWin.innerHTML = `
         <button class="sp"></button><button data-joy="3">↓</button><button class="sp"></button>
       </div>
     </div>
-    <div class="ramn-sec">
+    <div class="ramn-sec" data-ctl="lights">
       <div class="ramn-sec-lbl"><span>Lights</span></div>
       <div class="ramn-seg" id="ramnCtrlLights">
         <button data-val="1">Off</button><button data-val="2">Clr</button><button data-val="3">Low</button><button data-val="4">High</button>
       </div>
     </div>
-    <div class="ramn-sec">
+    <div class="ramn-sec" data-ctl="key">
       <div class="ramn-sec-lbl"><span>Engine key</span></div>
       <div class="ramn-seg" id="ramnCtrlKey">
         <button data-val="1">Off</button><button data-val="2">Acc</button><button data-val="3">Ign</button>
       </div>
     </div>
-    <div class="ramn-sec">
+    <div class="ramn-sec" data-ctl="handbrake">
       <div class="ramn-toggle" id="ramnCtrlHand" data-color="red">Handbrake</div>
     </div>
     <div class="ramn-hint">
@@ -631,18 +631,38 @@ function syncCtrlUI() {
   cel.hand.classList.toggle('on', !!ramnCtrl.handbrake); cel.hand.classList.toggle('red', !!ramnCtrl.handbrake);
 }
 
+// Which of this panel's controls a non-RAMN demo base traffic still carries, and in what. The
+// J1939 demos encode them as the driver-demand groups (j1939-flavor.js), the NMEA 2000 demo sends
+// Steer as a PGN 127245 rudder order (nmea2000.js). A base traffic missing here carries none.
+const BASE_CARRIES = {
+  j1939:    { ctl: ['brake', 'accel', 'steer', 'gear', 'handbrake'], via: 'EEC2 / EBC1 / VDC2 / TC1 / CCVS' },
+  iso11783: { ctl: ['brake', 'accel', 'steer', 'gear', 'handbrake'], via: 'EEC2 / EBC1 / VDC2 / TC1 / CCVS' },
+  nmea2000: { ctl: ['steer'], via: 'the PGN 127245 rudder order' },
+};
+
 function syncTrafficUI() {
-  // The demo's base traffic can be something other than RAMN (J1939, NMEA 2000, ...), in which
-  // case nothing decodes these sliders' frames either - grey the whole panel the same as
-  // ramnTraffic off, and say why.
-  const baseNotRamn = window.demoGetBaseTraffic && window.demoGetBaseTraffic() !== 'ramn';
-  cel.body.classList.toggle('ramn-ctrl-off', !ramnTraffic || baseNotRamn);
-  cel.dot.classList.toggle('off', !ramnTraffic || baseNotRamn);
+  // The demo's base traffic can be something other than RAMN (J1939, NMEA 2000, ...): the controls
+  // it does not carry grey out, all of them when it carries none - the same as ramnTraffic off -
+  // and the note says why.
+  const base = window.demoGetBaseTraffic ? window.demoGetBaseTraffic() : 'ramn';
+  const baseNotRamn = base !== 'ramn';
+  const carries = BASE_CARRIES[base];
+  const live = (ctl) => !baseNotRamn || (carries && carries.ctl.includes(ctl));
+  const allOff = !ramnTraffic || (baseNotRamn && !carries);
+  cel.body.classList.toggle('ramn-ctrl-off', allOff);
+  cel.dot.classList.toggle('off', allOff);
   cel.traffic.textContent = ramnTraffic ? 'Disable traffic' : 'Enable traffic';
   cel.traffic.classList.toggle('on', !ramnTraffic); cel.traffic.classList.toggle('amber', !ramnTraffic);
-  [cel.brake, cel.accel, cel.steer].forEach(r => { r.disabled = !ramnTraffic || baseNotRamn; });
+  cel.body.querySelectorAll('.ramn-sec[data-ctl]').forEach(sec => sec.classList.toggle('ramn-sec-off', !live(sec.dataset.ctl)));
+  cel.brake.disabled = allOff || !live('brake');
+  cel.accel.disabled = allOff || !live('accel');
+  cel.steer.disabled = allOff || !live('steer');
   cel.baseNote.style.display = baseNotRamn ? '' : 'none';
-  if (baseNotRamn) cel.baseNote.textContent = 'RAMN traffic is off - the base traffic is ' + window.demoBaseTrafficLabel() + '.';
+  if (baseNotRamn) {
+    cel.baseNote.textContent = carries
+      ? 'The base traffic is ' + window.demoBaseTrafficLabel() + ' - the live controls drive through ' + carries.via + '.'
+      : 'RAMN traffic is off - the base traffic is ' + window.demoBaseTrafficLabel() + '.';
+  }
 }
 
 function ramnSetTraffic(on) {
@@ -802,6 +822,8 @@ window.ramnSyncTrafficUI = syncTrafficUI;             // ← sloppycan.js demoSe
 window.ramnTrafficOn = () => ramnTraffic;             // ← sloppycan.js demoTick
 // Live interpreted signal state (decoded from CAN - hardware or demo). Read by carlito.js.
 window.ramnGetState = () => ({ ...ramnState });
+// The panel's own values, for a demo that encodes them in another protocol (j1939.js).
+window.ramnCtrlGet = () => ({ ...ramnCtrl });
 // Whether an IN_SOURCES field name's RAMN frame has been decoded since the last ramnClear. Read
 // by carlito.js so a field with no frame yet is omitted rather than sent at its blank default.
 window.ramnSeen = name => ramnSeenFields.has(name);
