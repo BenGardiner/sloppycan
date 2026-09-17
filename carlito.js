@@ -598,10 +598,9 @@
     // 0x520-0x528 is a frozen layout (anything already on the wire decodes against it), so the
     // vehicle-specific telemetry continues in new IDs rather than filling their spare bytes. Same rules as
     // above: big-endian, `enc`, an explicit fixed-point scale per field, unit in the comment.
-    // ATTITUDE - bike lean, boat/plane pitch and roll. deg x100 (i16): roll's +/-180 deg is
+    // ATTITUDE - boat/plane/drone pitch and roll. deg x100 (i16): roll's +/-180 deg is
     // +/-18000, comfortably inside i16. `fast` because attitude at 10 Hz visibly stair-steps.
-    { id: 0x529, fast: true,  fields: [['lean', t => enc.i16((+t.lean || 0) * 100)],            // deg x100
-                                       ['pitch', t => enc.i16((+t.pitch || 0) * 100)],          // deg x100
+    { id: 0x529, fast: true,  fields: [['pitch', t => enc.i16((+t.pitch || 0) * 100)],          // deg x100
                                        ['roll', t => enc.i16((+t.roll || 0) * 100)]] },         // deg x100
     // RATES - the plane's gyro pair plus vertical acceleration. rad/s x1000 matches yaw in 0x522,
     // m/s^2 x100 matches accLong/accLat, so the three IMU frames share one scale vocabulary.
@@ -658,6 +657,9 @@
   // THE REASON STRING IS MANDATORY here too, for the same reason it is above.
   const CAN_MAP_ON_REQUEST = {
     speed_limit: 'configured, not measured: J1939 SPN 74 rides PGN 65261 (CCSS), whose transmission repetition rate is "On request" - so it has no periodic frame by design, and j1939.js answers a PGN 59904 request for it out of the live telemetry. The contract calls the SPN "the naming reference here, not a claim about the wire", and this changes nothing about that: the signal TYPE already IS SPN 74\'s wire form exactly (one byte, 1 km/h per bit, 0 offset), which is the only reason it can be answered without a conversion',
+    engine_hours: 'SPN 247 rides PGN 65253 (HOURS), whose J1939-71 transmission repetition ' +
+      'rate is "On request" - there is no periodic frame to put it in, and broadcasting it at ' +
+      '10 Hz would misstate its rate. j1939.js answers a PGN 59904 request for it instead',
   };
 
   // ── Flavor packers ──────────────────────────────────────────────────────────

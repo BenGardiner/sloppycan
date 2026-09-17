@@ -346,17 +346,8 @@
               'pto_state', 'pto_rpm', 'hitch_pos_actual', 'draft_force',
               'wheel_speed', 'ground_speed',
               'implement_connected', 'implement_type'],
-    // Carried, but not on a clock. SPN 247 rides PGN 65253 (HOURS), whose J1939-71 transmission
-    // repetition rate is literally "On request" - so it has no periodic frame by design, which is
-    // why it was an `unpackable` entry here until there was a request path to point at. There is
-    // now: j1939.js answers a PGN 59904 request for 65253 out of the game's telemetry. That entry
-    // said the same path would retire it and `speed_limit` together, and it did. This packer
-    // still packs nothing for it, which is why it is not in `signals` either.
-    onRequest: {
-      engine_hours: 'SPN 247 rides PGN 65253 (HOURS), whose J1939-71 transmission repetition ' +
-        'rate is "On request" - there is no periodic frame to put it in, and broadcasting it at ' +
-        '10 Hz would misstate its rate. j1939.js answers a PGN 59904 request for it instead',
-    },
+    // `engine_hours` is no longer this flavor's (the contract unflavored it when the boat gained
+    // one), so its request-served declaration moved to carlito.js's CAN_MAP_ON_REQUEST.
     unpackable: {
       wheel_slip: 'no SPN exists for it. Wheel slip IS wheel_speed running ahead of ground_speed, ' +
         'which is exactly why ISO 11783-7 defines the two speeds as separate messages (SPN 1862 in ' +
