@@ -206,8 +206,8 @@ td.mono, th.mono { font-family: var(--mono); }
       <tr><td class="mono">65091 / 65092</td><td>Primary / Secondary PTO Output Shaft</td><td>shaft speed + setpoint (rpm), engaged</td></tr>
       <tr><td class="mono">65093 / 65094</td><td>Primary / Secondary Hitch Status</td><td>position (%), in-work, nominal lower link force (%), draft (N)</td></tr>
       <tr><td class="mono">65256</td><td>Vehicle Direction / Speed</td><td>compass bearing, navigation speed, pitch, altitude</td></tr>
-      <tr><td class="mono">57344</td><td>Task Controller Process Data</td><td>command, element, DDI, value</td></tr>
-      <tr><td class="mono">230 / 231</td><td>Virtual Terminal ↔ ECU</td><td>VT function byte (labelled)</td></tr>
+      <tr><td class="mono">52224</td><td>Task Controller Process Data</td><td>command, element, DDI, value</td></tr>
+      <tr><td class="mono">58880 / 59136</td><td>Virtual Terminal ↔ ECU</td><td>VT function byte (labelled)</td></tr>
     </tbody>
   </table>
   <p>
@@ -222,7 +222,7 @@ td.mono, th.mono { font-family: var(--mono); }
   <h2>ETP, the New Transport</h2>
   <p>
     Standard J1939 TP caps a message at <strong>1785 bytes</strong> (255 packets × 7). ISOBUS
-    object pools and large Task-Controller transfers blow past that, so ISO 11783-6 defines
+    object pools and large Task-Controller transfers blow past that, so ISO 11783-3 defines
     the <strong>Extended Transport Protocol</strong>, which uses two dedicated PGNs:
     <strong>ETP.CM</strong> (connection management) on <code>0xC800</code> and
     <strong>ETP.DT</strong> (data) on <code>0xC700</code>.

@@ -212,7 +212,7 @@ td.mono, th.mono { font-family: var(--mono); }
     <thead><tr><th class="mono">Byte 0</th><th>Class</th><th>Meaning</th></tr></thead>
     <tbody>
       <tr><td class="mono">0xFF</td><td><strong>RES</strong></td><td>Positive command response, decode it <em>in the context of the command you sent</em></td></tr>
-      <tr><td class="mono">0xFE</td><td><strong>ERR</strong></td><td>Error. Byte 1 is the error code (e.g. <code>0x13</code> ERR_CMD_UNKNOWN)</td></tr>
+      <tr><td class="mono">0xFE</td><td><strong>ERR</strong></td><td>Error. Byte 1 is the error code (e.g. <code>0x20</code> ERR_CMD_UNKNOWN)</td></tr>
       <tr><td class="mono">0xFD</td><td><strong>EV</strong></td><td>Event packet (DAQ overload, session terminated, …)</td></tr>
       <tr><td class="mono">0xFC</td><td><strong>SERV</strong></td><td>Service request packet</td></tr>
       <tr><td class="mono">0x00–0xFB</td><td><strong>DAQ</strong></td><td>Measurement data: the first byte is the PID (ODT number); the rest is sampled signal data</td></tr>
@@ -319,11 +319,13 @@ td.mono, th.mono { font-family: var(--mono); }
     <tbody>
       <tr><td class="mono">0x10</td><td>ERR_CMD_BUSY</td></tr>
       <tr><td class="mono">0x11</td><td>ERR_DAQ_ACTIVE</td></tr>
-      <tr><td class="mono">0x13</td><td>ERR_CMD_UNKNOWN, command not implemented</td></tr>
-      <tr><td class="mono">0x15</td><td>ERR_OUT_OF_RANGE, parameter out of range</td></tr>
-      <tr><td class="mono">0x17</td><td>ERR_ACCESS_DENIED</td></tr>
-      <tr><td class="mono">0x18</td><td>ERR_ACCESS_LOCKED, Seed &amp; Key required</td></tr>
-      <tr><td class="mono">0x22</td><td>ERR_VERIFY, slave's verify routine failed</td></tr>
+      <tr><td class="mono">0x20</td><td>ERR_CMD_UNKNOWN, command not implemented</td></tr>
+      <tr><td class="mono">0x21</td><td>ERR_CMD_SYNTAX, malformed command</td></tr>
+      <tr><td class="mono">0x22</td><td>ERR_OUT_OF_RANGE, parameter out of range</td></tr>
+      <tr><td class="mono">0x23</td><td>ERR_WRITE_PROTECTED</td></tr>
+      <tr><td class="mono">0x24</td><td>ERR_ACCESS_DENIED</td></tr>
+      <tr><td class="mono">0x25</td><td>ERR_ACCESS_LOCKED, Seed &amp; Key required</td></tr>
+      <tr><td class="mono">0x32</td><td>ERR_VERIFY, slave's verify routine failed</td></tr>
     </tbody>
   </table>
 

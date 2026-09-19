@@ -223,10 +223,12 @@ td.mono, th.mono { font-family: var(--mono); }
     </table>
   </div>
   <p>
-    The negative-response-code list also differs in spots: KWP has block-transfer codes
-    (<code>0x71</code>-<code>0x79</code>) and <code>0xA0 ecuNotResponding</code> /
-    <code>0xA1 ecuAddressUnknown</code>, which UDS doesn't define. sloppyCAN's KWP mode names
-    these from the ISO 14230 table.
+    The negative-response-code list also differs in spots. The routing codes
+    <code>0xA0 ecuNotResponding</code> and <code>0xA1 ecuAddressUnknown</code> are a KWP thing,
+    left over from the K-line world where a gateway sat between the tester and the ECU, and UDS
+    doesn't define them. (The block-transfer codes around <code>0x71</code>-<code>0x73</code> look
+    like a difference but aren't: UDS kept them.) sloppyCAN's KWP mode names these from the
+    ISO 14230 table.
   </p>
 
   <h2>A Typical Session</h2>

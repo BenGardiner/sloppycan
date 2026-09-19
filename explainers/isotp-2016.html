@@ -694,7 +694,7 @@ table.cmp td.no  { color: var(--text3); }
         <td>PCI trigger</td>
         <td><code>0x01</code>–<code>0x07</code></td>
         <td><code>0x00</code> + length byte</td>
-        <td><code>0x10</code>–<code>0x1F</code> (≠ <code>0x10</code>)</td>
+        <td><code>0x10</code>–<code>0x1F</code>, low 12 bits ≠ 0</td>
         <td><code>0x10 0x00</code> + 4-byte length</td>
       </tr>
       <tr>

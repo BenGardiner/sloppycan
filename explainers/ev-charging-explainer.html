@@ -214,7 +214,8 @@ td.mono, th.mono { font-family: var(--mono); }
 
   <h3>Control Pilot: duty cycle to amps</h3>
   <p>For most of the range the rule is linear: <code>available A = duty% × 0.6</code>.
-    Above 85% it switches to a stepped high-power encoding.</p>
+    Above 85% a second, steeper linear rule takes over, and past 96% it stops encoding a
+    number at all.</p>
   <div class="lane">CP, 1 kHz, ~50% duty ≈ 30 A available</div>
   <div class="pwm">
     <div class="hi"></div><div class="lo"></div>
@@ -226,8 +227,10 @@ td.mono, th.mono { font-family: var(--mono); }
     <thead><tr><th>Duty cycle</th><th>Meaning</th></tr></thead>
     <tbody>
       <tr><td class="mono">10% – 85%</td><td>Available current = duty × 0.6 A (e.g. 50% → 30 A)</td></tr>
+      <tr><td class="mono">85% – 96%</td><td>Available current = (duty − 64) × 2.5 A (e.g. 90% → 65 A)</td></tr>
+      <tr><td class="mono">96% – 97%</td><td>80 A</td></tr>
       <tr><td class="mono">5%</td><td>Digital communication required (ISO 15118 / DIN handshake)</td></tr>
-      <tr><td class="mono">100% (steady +12 V)</td><td>No charging allowed / not ready</td></tr>
+      <tr><td class="mono">&lt; 3% or &gt; 97% (incl. steady +12 V)</td><td>No charging allowed / not ready</td></tr>
     </tbody>
   </table>
 

@@ -291,15 +291,17 @@ td.mono, th.mono { font-family: var(--mono); }
       <tr><th class="mono">ID</th><th>Standard</th><th>What it does</th><th>Limitation</th></tr>
       <tr><td class="mono">7DF</td><td>OBD-II</td><td>Functional request, "whoever supports this PID, answer"</td><td>Multiple ECUs may all reply, staggered by the stack. Fine for polling, unusable for anything needing a single deterministic response</td></tr>
       <tr><td class="mono">18DB33F1</td><td>UDS (extended)</td><td>Functional addressing equivalent of 7DF for 29-bit UDS</td><td>Same multi-responder problem; also can't carry a SecurityAccess-gated unlock meant for one ECU</td></tr>
-      <tr><td class="mono">0x00 / NM frames</td><td>J1939</td><td>Global destination address <code>0xFF</code> in the PDU, "all nodes," used for things like time/date broadcasts</td><td>No node can target an ACK back to the sender for a destination-specific reply; J1939 has no frame-level ACK at all, only application-level confirmations on point-to-point PGNs</td></tr>
+      <tr><td class="mono">PDU1 to DA <code>0xFF</code></td><td>J1939</td><td>Global destination address <code>0xFF</code> in a PDU1 message (and every PDU2 broadcast), "all nodes," used for things like time/date broadcasts</td><td>Nothing tells you <em>who</em> received it: the Acknowledgment PGN (59392) is only sent by a node that was addressed specifically, so a global request may get many answers, or none</td></tr>
     </table>
   </div>
   <p class="note warn">
-    <strong>Broadcast isn't acknowledged.</strong> Both UDS functional requests and J1939 global PGNs are
-    fire-and-forget from the bus's point of view. There's no wired-AND ACK slot meaning "everyone got it,"
-    because a functional/global frame's whole point is that the sender doesn't know, or care, exactly who's
-    listening. If you need confirmation a specific ECU received something, address it physically
-    (UDS request ID, or a J1939 destination-specific PGN) and wait for its actual reply, not the CAN ACK bit.
+    <strong>Broadcast isn't acknowledged <em>by anyone in particular</em>.</strong> CAN does have a
+    wired-AND ACK slot, and it is filled on a broadcast frame just like any other, but it only means
+    "at least one node on the bus received this frame intact". It names nobody, and a node that heard
+    the frame but doesn't implement the service still ACKs it. So both UDS functional requests and
+    J1939 global PGNs are fire-and-forget at the application layer. If you need confirmation that a
+    <em>specific</em> ECU received something, address it physically (UDS request ID, or a J1939
+    destination-specific PGN) and wait for its actual reply, not the CAN ACK bit.
   </p>
 
   <h2>UDS vs OBD-II vs KWP2000</h2>

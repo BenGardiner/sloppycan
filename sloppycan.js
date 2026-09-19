@@ -724,7 +724,13 @@ window.fuzzTxFrame = (id, isExt, dlc, bytes) => window.withTxLock(async () => {
       const idHex = (id & (isExt ? CAN_EFF_MASK : CAN_SFF_MASK)).toString(16).toUpperCase().padStart(isExt ? 8 : 3, '0');
       await sendCommand((isExt ? 'T' : 't') + idHex + dlc + bytes.map(b => b.toString(16).toUpperCase().padStart(2,'0')).join(''));
     }
-    recordTxFrame(id, isExt, false, dlc, [...bytes]);
+    const data = [...bytes];
+    recordTxFrame(id, isExt, false, dlc, data);
+    // Mirror into the RAMN decoder and the Carlito uplink decoders, as txSendOne does for a
+    // hand-sent frame, so a fuzzed/module frame drives the simulator exactly as a wire frame does.
+    const mirror = { id, isExt, isRtr: false, dlc, data };
+    if (window.ramnIngestFrame) ramnIngestFrame(mirror);
+    if (window.carlitoUplinkIngestFrame) carlitoUplinkIngestFrame(mirror);
     return true;
   } catch(e) { logTxErr(e); return false; }
 });

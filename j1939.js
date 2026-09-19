@@ -435,7 +435,7 @@ const ISOBUS_DB = {
     { spn:583, name:'Pitch',           b:4, n:2, f:1/128, o:-200,  u:'°',    dp:1 },
     { spn:580, name:'Altitude',        b:6, n:2, f:0.125, o:-2500, u:'m',    dp:1 },
   ]},
-  0xE000:{ name:'Task Controller / Process Data', abbr:'PD', decode: isoTcDecode },
+  0xCB00:{ name:'Task Controller / Process Data', abbr:'PD', decode: isoTcDecode },
   0xE600:{ name:'VT → ECU', abbr:'VT→ECU', decode: isoVtDecode },
   0xE700:{ name:'ECU → VT', abbr:'ECU→VT', decode: isoVtDecode },
   0xEA00:{ name:'Request PGN', abbr:'RQST', fields:[ { name:'Requested PGN', bo:0, bl:24 } ]},
@@ -1511,7 +1511,7 @@ function isoDemoFrames() {
 
   // Task Controller (SA 0x80): a "Value" (cmd 3) for application-rate DDI 271.
   const ddi = 271, element = 5, cmd = 3, val = Math.round(osc(0, 5000, 8));
-  frames.push(n2kFrame(0xE000, 0x80, [((element & 0x0F) << 4) | cmd, (element >> 4) & 0xFF, ddi & 0xFF, (ddi >> 8) & 0xFF, val & 0xFF, (val >> 8) & 0xFF, (val >> 16) & 0xFF, (val >> 24) & 0xFF]));
+  frames.push(n2kFrame(0xCB00, 0x80, [((element & 0x0F) << 4) | cmd, (element >> 4) & 0xFF, ddi & 0xFF, (ddi >> 8) & 0xFF, val & 0xFF, (val >> 8) & 0xFF, (val >> 16) & 0xFF, (val >> 24) & 0xFF]));
 
   // Address claims (ag NAMEs, every 30th tick): a tractor + a sprayer implement.
   if (tick % 30 === 0) {
