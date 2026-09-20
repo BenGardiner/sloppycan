@@ -229,15 +229,32 @@ function setFpsLimit(fps) {
   RENDER_INTERVAL = fps === 0 ? 16 : Math.round(1000 / fps);
 }
 
-// Check Web Serial API
-if (!navigator.serial && !(_onAndroid && navigator.usb)) {
+// Check transport availability per adapter mode.
+const serialAdapterAvailable = !!navigator.serial || !!(_onAndroid && navigator.usb);
+if (!serialAdapterAvailable) {
   document.getElementById('noSerialBanner').style.display = 'block';
-  document.getElementById('connectBtn').disabled = true;
+  const opt = document.querySelector('#adapterType option[value="serial"]');
+  if (opt) opt.disabled = true;
 }
 // gs_usb is WebUSB-only - disable the option if WebUSB is unavailable
 if (!navigator.usb) {
   const opt = document.querySelector('#adapterType option[value="gsusb"]');
   if (opt) opt.disabled = true;
+}
+if (!window.WebSocket) {
+  const opt = document.querySelector('#adapterType option[value="socket"]');
+  if (opt) opt.disabled = true;
+}
+if (!serialAdapterAvailable && !navigator.usb && !window.WebSocket) {
+  document.getElementById('connectBtn').disabled = true;
+}
+{
+  const sel = document.getElementById('adapterType');
+  const current = sel && sel.options[sel.selectedIndex];
+  if (sel && current && current.disabled) {
+    const firstEnabled = Array.from(sel.options).find(o => !o.disabled);
+    if (firstEnabled) sel.value = firstEnabled.value;
+  }
 }
 
 // ── TX Scheduler ──────────────────────────────────────────────────────────────
@@ -575,7 +592,7 @@ function recordTxFrame(id, isExt, isRtr, dlc, data) {
 }
 
 async function txSendOne(msg) {
-  if (!busIsOpen || (!port && !usbSerDev && !demoMode)) {
+  if (!busIsOpen || (!port && !usbSerDev && !slcanSocket && !demoMode)) {
     const el = document.getElementById(`txstat-${msg.seq}`);
     if (el) { el.textContent = 'NO BUS'; el.className = 'tx-status error'; }
     return;
@@ -687,7 +704,7 @@ window.renderTxModuleRows = renderTxModuleRows;   // fuzz.js refreshes its summa
 // Single seam the fuzzer calls to put a raw frame on the wire. Mirrors the
 // transport branch + dumpLog/frames bookkeeping in txSendOne, but takes raw
 // values (id number, byte array) instead of a scheduler row object.
-window.fuzzBusReady = () => busIsOpen && (port || usbSerDev || demoMode);
+window.fuzzBusReady = () => busIsOpen && (port || usbSerDev || slcanSocket || demoMode);
 // TX allowed only on an open bus that isn't listen-only. Single accessor so modules don't each
 // reach into the #listenOnly DOM id (which throws if renamed). Mirrors obdBusReady's intent.
 window.txReady = () => !!window.fuzzBusReady() && !document.getElementById('listenOnly').checked;
@@ -1257,10 +1274,19 @@ function hwConnectWarning() {
 }
 
 async function connectSerial() {
-  const adapter = document.getElementById('adapterType').value; // 'serial' | 'gsusb'
+  const adapter = document.getElementById('adapterType').value; // 'serial' | 'socket' | 'gsusb'
   if (!await hwConnectWarning()) return;
   try {
-    if (adapter === 'gsusb') {
+    if (adapter === 'socket') {
+      connMode = 'socket';
+      const rawUrl = document.getElementById('socketTunnelUrl').value;
+      const url = normalizeSocketTunnelUrl(rawUrl);
+      slcanSocket = await openSocketTunnel(url);
+      slcanSocketUrl = url;
+      document.getElementById('socketTunnelUrl').value = url;
+      log(`Socket tunnel opened (${url})`, 'ok');
+      document.getElementById('deviceInfo').textContent = `SLCAN tunnel: ${url}`;
+    } else if (adapter === 'gsusb') {
       connMode = 'gsusb';
       const {dev, inEp, outEp, name} = await openGsUsb();
       usbSerDev = dev; usbSerIn = inEp; usbSerOut = outEp;
@@ -1305,6 +1331,7 @@ async function connectSerial() {
     document.getElementById('baudRate').disabled = true;
     document.getElementById('adapterType').disabled = true;
     document.getElementById('autoOpen').disabled = true;
+    updateAdapterSettingsUi();
     if (document.getElementById('listenOnly').checked) {
       document.getElementById('vtab-isotp').disabled = true;
       document.getElementById('txPanel').style.opacity = '0.4';
@@ -1329,10 +1356,19 @@ async function connectSerial() {
     // and close it. Null ALL transport refs (usbSerIn/usbSerOut were left set before) so a retry
     // starts from clean state.
     try { if (connMode === 'gsusb' && usbSerDev) await gsSetMode(false, false); } catch(_) {}
+    try {
+      if (slcanSocket) {
+        const ws = slcanSocket;
+        slcanSocket = null;
+        slcanSocketUrl = '';
+        ws.close();
+      }
+    } catch(_) {}
     try { if (port) await port.close(); } catch(_) {}
     try { if (usbSerDev) await usbSerDev.close(); } catch(_) {}
     port = null;
     usbSerDev = null; usbSerIn = null; usbSerOut = null;
+    slcanSocket = null; slcanSocketUrl = '';
     connMode = 'serial';
   }
 }
@@ -1373,7 +1409,12 @@ function requireBusForCarlito() {
 window.requireBusForCarlito = requireBusForCarlito;
 
 async function disconnectSerial() {
-  if (usbSerDev) {
+  if (slcanSocket) {
+    const ws = slcanSocket;
+    slcanSocket = null;
+    slcanSocketUrl = '';
+    try { ws.close(); } catch(e) {}
+  } else if (usbSerDev) {
     if (connMode === 'gsusb') { try { await gsSetMode(false, false); } catch(e) {} }
     const dev = usbSerDev;
     usbSerDev = null; usbSerIn = null; usbSerOut = null;
@@ -1408,6 +1449,7 @@ async function disconnectSerial() {
   document.getElementById('baudRate').disabled = false;
   document.getElementById('adapterType').disabled = false;
   document.getElementById('autoOpen').disabled = false;
+  updateAdapterSettingsUi();
   document.getElementById('vtab-isotp').disabled = false;
   document.getElementById('txPanel').style.opacity = '';
   document.getElementById('txPanel').style.pointerEvents = '';
@@ -2351,7 +2393,7 @@ function updateBusPauseBtn() {
   const badge = document.getElementById('pausedBadge');
 
   // Pause button is disabled only when there is no connection (#8 - no terminal-mode conflict gating).
-  const hasConnection = demoMode || (port !== null) || (usbSerDev !== null);
+  const hasConnection = demoMode || (port !== null) || (usbSerDev !== null) || (slcanSocket !== null);
   btn.disabled = !hasConnection;
 
   if (!busIsOpen) {
@@ -2379,7 +2421,7 @@ function updateTerminalTab() {
   // gs_usb has no SLCAN text channel - hide the terminal tab entirely.
   if (connMode === 'gsusb') { tab.style.display = 'none'; return; }
   tab.style.display = '';
-  const connected = demoMode || !!port || !!usbSerDev;
+  const connected = demoMode || !!port || !!usbSerDev || !!slcanSocket;
   tab.disabled = !connected;
   tab.title = connected ? '' : 'Connect or start demo to use the Serial Terminal';
   updateTermTrafficWarn();
@@ -4369,6 +4411,7 @@ function defaultWorkspaceData() {
     filter: { frameType: 'all', dataType: 'all', ids: '', idsExclude: false, data: '',
               onlyUnseen: false, onlyHighlighted: false, onlyRx: false },
     notch: { duration: '1', hotMs: 500 },
+    adapterType: 'serial', socketUrl: 'ws://127.0.0.1:29542/',
     baud: 'S6', listenOnly: false, autoOpen: true,
     tx: [ { enabled: false, ext: false, rtr: false, id: '7DF', dlc: 8,
             data: '02 3E 00 00 00 00 00 00', period: 100, note: 'Broadcasts UDS Tester Present' } ],
@@ -4420,6 +4463,8 @@ function collectSettings() {
       onlyRx: _el('filterOnlyRx').checked,
     },
     notch: { duration: _el('notchDuration').value, hotMs },
+    adapterType: _el('adapterType').value || 'serial',
+    socketUrl: sanitizeSocketTunnelUrlForSave(_el('socketTunnelUrl').value),
     baud: _el('baudRate').value,
     listenOnly: _el('listenOnly').checked,
     autoOpen: _el('autoOpen').checked,
@@ -4483,6 +4528,16 @@ function applySettings(d) {
   _el('notchDuration').value = n.duration ?? '1';
   updateNotchLabels();
 
+  const wantedAdapter = (d.adapterType === 'gsusb' || d.adapterType === 'socket') ? d.adapterType : 'serial';
+  const adapterSel = _el('adapterType');
+  const wantedOpt = adapterSel.querySelector(`option[value="${wantedAdapter}"]`);
+  if (wantedOpt && !wantedOpt.disabled) adapterSel.value = wantedAdapter;
+  else {
+    const firstEnabled = Array.from(adapterSel.options).find(o => !o.disabled);
+    if (firstEnabled) adapterSel.value = firstEnabled.value;
+  }
+  _el('socketTunnelUrl').value = d.socketUrl || 'ws://127.0.0.1:29542/';
+  updateAdapterSettingsUi();
   _el('baudRate').value    = d.baud ?? 'S6';
   _el('listenOnly').checked = !!d.listenOnly;
   _el('autoOpen').checked   = d.autoOpen !== false;
@@ -4795,6 +4850,39 @@ function toggleConnectPopover(forceOpen) {
   }
 }
 function closeConnectPopover() { const p = _el('connectPopover'); if (p) p.style.display = 'none'; }
+function normalizeSocketTunnelUrl(raw) {
+  const v = String(raw || '').trim();
+  if (!v) throw new Error('Socket tunnel URL is required');
+  let url;
+  try { url = new URL(v); }
+  catch (_) { throw new Error('Socket tunnel URL must be a valid ws:// or wss:// URL'); }
+  if (!/^wss?:$/.test(url.protocol)) throw new Error('Socket tunnel URL must use ws:// or wss://');
+  if (!url.hostname) throw new Error('Socket tunnel URL must include a host');
+  return url.toString();
+}
+// Persist only non-sensitive endpoint coordinates; credentials/query/hash are intentionally dropped.
+function sanitizeSocketTunnelUrlForSave(raw) {
+  const v = String(raw || '').trim();
+  if (!v) return '';
+  try {
+    const url = new URL(v);
+    if (!/^wss?:$/.test(url.protocol)) return '';
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch (_) {
+    return '';
+  }
+}
+function updateAdapterSettingsUi() {
+  const adapter = _el('adapterType')?.value || 'serial';
+  const row = _el('socketTunnelRow');
+  const input = _el('socketTunnelUrl');
+  if (row) row.style.display = adapter === 'socket' ? '' : 'none';
+  if (input) input.disabled = adapter !== 'socket' || _el('adapterType').disabled;
+}
 
 // Autosave: one delegated listener persists any settings-control change/input,
 // instead of editing the many inline handlers. Debounced; ignored while restoring.
@@ -4809,6 +4897,7 @@ document.addEventListener('input', e => {
 
 // ── Startup ──────────────────────────────────────────────────────────────────
 log('sloppyCAN ready. Click Connect to open your serial adapter.', 'ok');
+updateAdapterSettingsUi();
 
 // Restore global UI prefs + workspaces (with one-time migration from legacy keys)
 let _prefs = {};

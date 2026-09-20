@@ -28,6 +28,8 @@ A browser-based CAN bus tool. No backend, no install, no build step, just open `
 - A supported USB-to-CAN adapter: pick the type with the **Adapter** dropdown
   (`SLCAN` or `gs_usb`, e.g. candleLight / CANable / RAMN). gs_usb is WebUSB-only and classic
   CAN only (no CAN-FD).
+- Optional: a WebSocket tunnel endpoint that forwards bytes to a remote raw TCP SLCAN socket
+  (python-can `socket://` style, raw SLCAN stream, no telnet negotiation).
 - No hardware? Click **Demo** for a fully simulated bus.
 
 ## Running
@@ -66,6 +68,27 @@ transmitted when a bus is open). Any language works: the relay's TCP port `29541
 `cansend`-style line per frame (`123#DEADBEEF`), so `nc 127.0.0.1 29541` is a live candump.
 Chrome asks once to allow local network access when the hosted page connects. Opened from
 `file://`? Start the relay with `--allow-file-origin`.
+
+### Remote SLCAN over TCP tunnel (`socket://` compatible)
+
+Use the Adapter mode **SLCAN (socket tunnel)** to connect through a WebSocket endpoint that bridges
+to a remote raw TCP SLCAN socket. The protocol is still plain SLCAN lines delimited by `\r` (`Sx`,
+`O`/`L`, `C`, `t`/`T`/`r`/`R`) - no telnet commands/options are sent or expected.
+
+Recommended boundary:
+
+- Browser ⇄ **WebSocket tunnel endpoint**
+- Tunnel endpoint ⇄ **remote raw TCP SLCAN socket** (the same stream python-can `slcanBus("socket://...")` uses)
+
+Example with `websocat` on the machine that can reach the remote adapter:
+
+```bash
+websocat -E ws-l:127.0.0.1:29542 tcp:REMOTE_HOST:REMOTE_PORT
+```
+
+Then in SloppyCAN set the tunnel URL to `ws://127.0.0.1:29542/`.
+Prefer binding the tunnel to localhost (or a tightly scoped private interface) and enforce an
+origin allowlist/TLS on any shared endpoint, because the browser side is WebSocket-based.
 
 ## Features
 

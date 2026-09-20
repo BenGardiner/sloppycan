@@ -22,12 +22,14 @@
 // On index.html these are defined by sloppycan.js; carlito-bridge.js supplies its own.
 
 // ── Connection / protocol state ────────────────────────────────────────────────
-let connMode = 'serial';       // 'serial' (Web Serial + Android CDC) | 'gsusb'
+let connMode = 'serial';       // 'serial' (Web Serial + Android CDC) | 'socket' (WS→raw-TCP tunnel) | 'gsusb'
 let port = null;
 let reader = null;
 let usbSerDev = null;
 let usbSerIn  = null;
 let usbSerOut = null;
+let slcanSocket = null;
+let slcanSocketUrl = '';
 let busIsOpen = false;
 let frameBuffer = '';
 let termBuffer  = ''; // accumulates bytes for terminal line display
@@ -68,6 +70,61 @@ function getBitrateHz() {
   return (el && SLCAN_BITRATE_HZ[el.value]) || 500000;
 }
 
+const socketUtf8Decoder = new TextDecoder();
+const socketUtf8Encoder = new TextEncoder();
+function socketByteLen(data) {
+  return typeof data === 'string' ? socketUtf8Encoder.encode(data).byteLength
+    : (data && data.byteLength) || 0;
+}
+function socketCountRxBytes(data) {
+  const n = socketByteLen(data);
+  if (!n) return;
+  bytesReceived += n;
+  document.getElementById('statBytes').textContent = bytesReceived.toLocaleString();
+}
+function socketChunkToText(data) {
+  return typeof data === 'string' ? data : socketUtf8Decoder.decode(data, { stream: true });
+}
+
+// Open a websocket endpoint that byte-bridges to a remote raw TCP SLCAN socket. The protocol here is
+// still plain SLCAN text (\\r-delimited) - no telnet negotiation/commands are sent or interpreted.
+function openSocketTunnel(url) {
+  return new Promise((resolve, reject) => {
+    let ws;
+    try { ws = new WebSocket(url); }
+    catch (e) { reject(e); return; }
+    ws.binaryType = 'arraybuffer';
+    let settled = false;
+    ws.onmessage = (ev) => {
+      if (connMode !== 'socket' || slcanSocket !== ws) return;
+      if (typeof ev.data !== 'string' && !(ev.data instanceof ArrayBuffer)) return;
+      socketCountRxBytes(ev.data);
+      dispatchSerialText(socketChunkToText(ev.data));
+    };
+    ws.onopen = () => {
+      if (settled) return;
+      settled = true;
+      resolve(ws);
+    };
+    ws.onerror = () => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('Socket tunnel connection failed'));
+    };
+    ws.onclose = () => {
+      if (!settled) {
+        settled = true;
+        reject(new Error('Socket tunnel closed during connect'));
+        return;
+      }
+      if (connMode === 'socket' && slcanSocket === ws) {
+        log('Socket tunnel disconnected', 'err');
+        disconnectSerial();
+      }
+    };
+  });
+}
+
 // ── SLCAN write path ─────────────────────────────────────────────────────────
 function encodeCmd(trimmed) {
   const bytes = new Uint8Array(trimmed.length + 1);
@@ -104,6 +161,13 @@ async function sendCommandRaw(cmd) {
       termLog('rx', 'Demo mode');
     }
     // All other demo sends (bus open/close, TX scheduler) are silent no-ops
+    return;
+  }
+  if (slcanSocket) {
+    if (slcanSocket.readyState !== WebSocket.OPEN) throw new Error('Socket tunnel not connected');
+    slcanSocket.send(trimmed + '\r');
+    termLog('tx', trimmed + '\\r');
+    recentTxPush(trimmed);
     return;
   }
   if (usbSerDev) {
