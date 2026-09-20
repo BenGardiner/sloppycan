@@ -1284,6 +1284,8 @@ async function connectSerial() {
       slcanSocket = await openSocketTunnel(url);
       slcanSocketUrl = url;
       document.getElementById('socketTunnelUrl').value = url;
+      // This raw SLCAN tunnel endpoint is expected to be a plain bridge URL, not one carrying auth
+      // material in userinfo/query params, so showing the normalized connect URL here is safe.
       log(`Socket tunnel opened (${url})`, 'ok');
       document.getElementById('deviceInfo').textContent = `SLCAN tunnel: ${url}`;
     } else if (adapter === 'gsusb') {
