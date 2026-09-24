@@ -28,7 +28,7 @@ A browser-based CAN bus tool. No backend, no install, no build step, just open `
 - A supported USB-to-CAN adapter: pick the type with the **Adapter** dropdown
   (`SLCAN` or `gs_usb`, e.g. candleLight / CANable / RAMN). gs_usb is WebUSB-only and classic
   CAN only (no CAN-FD).
-- Optional: a WebSocket tunnel endpoint that forwards bytes to a remote raw TCP SLCAN socket
+- Or a remote TCP tunnel endpoint that forwards bytes SLCAN connection
   (python-can `socket://` style, raw SLCAN stream, no telnet negotiation).
 - No hardware? Click **Demo** for a fully simulated bus.
 
