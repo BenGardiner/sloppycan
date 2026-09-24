@@ -4855,10 +4855,11 @@ function closeConnectPopover() { const p = _el('connectPopover'); if (p) p.style
 function normalizeSocketTunnelUrl(raw) {
   let v = String(raw || '').trim();
   if (!v) throw new Error('Socket tunnel URL is required');
+  const isHttps = typeof window !== 'undefined' && window.location && window.location.protocol === 'https:';
   if (/^socket:\/\//i.test(v)) {
-    v = 'ws://' + v.slice('socket://'.length);
+    v = (isHttps ? 'wss://' : 'ws://') + v.slice('socket://'.length);
   } else if (!/^wss?:\/\//i.test(v)) {
-    v = 'ws://' + v;
+    v = (isHttps ? 'wss://' : 'ws://') + v;
   }
   let url;
   try { url = new URL(v); }
@@ -4872,7 +4873,8 @@ function sanitizeSocketTunnelUrlForSave(raw) {
   const v = String(raw || '').trim();
   if (!v) return '';
   const isSocketProto = /^socket:\/\//i.test(v);
-  let toParse = isSocketProto ? ('ws://' + v.slice('socket://'.length)) : (!/^wss?:\/\//i.test(v) ? ('ws://' + v) : v);
+  const isHttps = typeof window !== 'undefined' && window.location && window.location.protocol === 'https:';
+  let toParse = isSocketProto ? ((isHttps ? 'wss://' : 'ws://') + v.slice('socket://'.length)) : (!/^wss?:\/\//i.test(v) ? ((isHttps ? 'wss://' : 'ws://') + v) : v);
   try {
     const url = new URL(toParse);
     if (!/^wss?:$/.test(url.protocol)) return '';
