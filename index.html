@@ -110,15 +110,15 @@
       <label class="header-check" title="Adapter protocol. SLCAN = serial text adapters; gs_usb = candleLight / CANable native (WebUSB).">
         <span class="hdr-tag">Adapter</span>
         <select id="adapterType" class="hdr-select" onchange="updateAdapterSettingsUi()">
-          <option value="serial" selected>SLCAN</option>
-          <option value="socket">SLCAN (socket tunnel)</option>
+          <option value="serial">SLCAN</option>
+          <option value="socket" selected>SLCAN (socket tunnel)</option>
           <option value="gsusb">gs_usb</option>
         </select>
       </label>
-      <label id="socketTunnelRow" class="header-check" style="display:none;flex-direction:column;align-items:stretch;gap:4px;white-space:normal"
+      <label id="socketTunnelRow" class="header-check" style="display:flex;flex-direction:column;align-items:stretch;gap:4px;white-space:normal"
              title="WebSocket endpoint that tunnels bytes to a remote raw TCP SLCAN socket (python-can socket:// compatible). Raw SLCAN only - no telnet negotiation.">
         <span class="hdr-tag">SLCAN socket tunnel (raw, no telnet)</span>
-        <input id="socketTunnelUrl" type="text" value="ws://127.0.0.1:29542/" placeholder="ws://host:port/path">
+        <input id="socketTunnelUrl" type="text" value="socket://0.cloud.chals.io:33939" placeholder="socket://0.cloud.chals.io:33939 or ws://host:port/">
       </label>
       <label class="header-check" title="CAN bus bit rate. Must match the bus you're tapping - a mismatch means no frames (or an error storm).">
         <span class="hdr-tag">Baudrate</span>

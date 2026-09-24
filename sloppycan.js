@@ -1283,11 +1283,10 @@ async function connectSerial() {
       const url = normalizeSocketTunnelUrl(rawUrl);
       slcanSocket = await openSocketTunnel(url);
       slcanSocketUrl = url;
-      document.getElementById('socketTunnelUrl').value = url;
-      // This raw SLCAN tunnel endpoint is expected to be a plain bridge URL, not one carrying auth
-      // material in userinfo/query params, so showing the normalized connect URL here is safe.
-      log(`Socket tunnel opened (${url})`, 'ok');
-      document.getElementById('deviceInfo').textContent = `SLCAN tunnel: ${url}`;
+      const displayUrl = rawUrl.trim() || url;
+      document.getElementById('socketTunnelUrl').value = displayUrl;
+      log(`Socket tunnel opened (${displayUrl})`, 'ok');
+      document.getElementById('deviceInfo').textContent = `SLCAN tunnel: ${displayUrl}`;
     } else if (adapter === 'gsusb') {
       connMode = 'gsusb';
       const {dev, inEp, outEp, name} = await openGsUsb();
@@ -4413,7 +4412,7 @@ function defaultWorkspaceData() {
     filter: { frameType: 'all', dataType: 'all', ids: '', idsExclude: false, data: '',
               onlyUnseen: false, onlyHighlighted: false, onlyRx: false },
     notch: { duration: '1', hotMs: 500 },
-    adapterType: 'serial', socketUrl: 'ws://127.0.0.1:29542/',
+    adapterType: 'socket', socketUrl: 'socket://0.cloud.chals.io:33939',
     baud: 'S6', listenOnly: false, autoOpen: true,
     tx: [ { enabled: false, ext: false, rtr: false, id: '7DF', dlc: 8,
             data: '02 3E 00 00 00 00 00 00', period: 100, note: 'Broadcasts UDS Tester Present' } ],
@@ -4538,7 +4537,7 @@ function applySettings(d) {
     const firstEnabled = Array.from(adapterSel.options).find(o => !o.disabled);
     if (firstEnabled) adapterSel.value = firstEnabled.value;
   }
-  _el('socketTunnelUrl').value = d.socketUrl || 'ws://127.0.0.1:29542/';
+  _el('socketTunnelUrl').value = d.socketUrl || 'socket://0.cloud.chals.io:33939';
   updateAdapterSettingsUi();
   _el('baudRate').value    = d.baud ?? 'S6';
   _el('listenOnly').checked = !!d.listenOnly;
@@ -4853,12 +4852,17 @@ function toggleConnectPopover(forceOpen) {
 }
 function closeConnectPopover() { const p = _el('connectPopover'); if (p) p.style.display = 'none'; }
 function normalizeSocketTunnelUrl(raw) {
-  const v = String(raw || '').trim();
+  let v = String(raw || '').trim();
   if (!v) throw new Error('Socket tunnel URL is required');
+  if (/^socket:\/\//i.test(v)) {
+    v = 'ws://' + v.slice('socket://'.length);
+  } else if (!/^wss?:\/\//i.test(v)) {
+    v = 'ws://' + v;
+  }
   let url;
   try { url = new URL(v); }
-  catch (_) { throw new Error('Socket tunnel URL must be a valid ws:// or wss:// URL'); }
-  if (!/^wss?:$/.test(url.protocol)) throw new Error('Socket tunnel URL must use ws:// or wss://');
+  catch (_) { throw new Error('Socket tunnel URL must be a valid endpoint (e.g. socket://host:port or ws://host:port)'); }
+  if (!/^wss?:$/.test(url.protocol)) throw new Error('Socket tunnel URL must use socket://, ws://, or wss://');
   if (!url.hostname) throw new Error('Socket tunnel URL must include a host');
   return url.toString();
 }
@@ -4866,13 +4870,18 @@ function normalizeSocketTunnelUrl(raw) {
 function sanitizeSocketTunnelUrlForSave(raw) {
   const v = String(raw || '').trim();
   if (!v) return '';
+  const isSocketProto = /^socket:\/\//i.test(v);
+  let toParse = isSocketProto ? ('ws://' + v.slice('socket://'.length)) : (!/^wss?:\/\//i.test(v) ? ('ws://' + v) : v);
   try {
-    const url = new URL(v);
+    const url = new URL(toParse);
     if (!/^wss?:$/.test(url.protocol)) return '';
     url.username = '';
     url.password = '';
     url.search = '';
     url.hash = '';
+    if (isSocketProto) {
+      return 'socket://' + url.host + (url.pathname === '/' ? '' : url.pathname);
+    }
     return url.toString();
   } catch (_) {
     return '';
