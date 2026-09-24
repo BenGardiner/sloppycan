@@ -63,6 +63,10 @@ if [ "$MODE" = dev ]; then
   rm -rf "$GHP/dev"
   mkdir -p "$GHP/dev"
   cp -r "$SRC/." "$GHP/dev/"
+  # Keep gh-pages root in sync with dev build:
+  find "$GHP" -mindepth 1 -maxdepth 1 \
+    -not -name .git -not -name dev -exec rm -rf {} +
+  cp -r "$SRC/." "$GHP/"
   MSG="deploy dev @ ${SITE_SHA}"
 else
   [ -f "$GHP/dev/index.html" ] || { echo "gh-pages:/dev/ is empty - push to dev and let CI publish before promoting"; exit 1; }

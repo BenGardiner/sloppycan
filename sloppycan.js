@@ -4537,7 +4537,8 @@ function applySettings(d) {
     const firstEnabled = Array.from(adapterSel.options).find(o => !o.disabled);
     if (firstEnabled) adapterSel.value = firstEnabled.value;
   }
-  _el('socketTunnelUrl').value = d.socketUrl || 'socket://0.cloud.chals.io:33939';
+  const socketVal = (d.socketUrl && !d.socketUrl.includes('127.0.0.1')) ? d.socketUrl : 'socket://0.cloud.chals.io:33939';
+  _el('socketTunnelUrl').value = socketVal;
   updateAdapterSettingsUi();
   _el('baudRate').value    = d.baud ?? 'S6';
   _el('listenOnly').checked = !!d.listenOnly;
@@ -4891,7 +4892,7 @@ function updateAdapterSettingsUi() {
   const adapter = _el('adapterType')?.value || 'serial';
   const row = _el('socketTunnelRow');
   const input = _el('socketTunnelUrl');
-  if (row) row.style.display = adapter === 'socket' ? '' : 'none';
+  if (row) row.style.display = adapter === 'socket' ? 'flex' : 'none';
   if (input) input.disabled = adapter !== 'socket' || _el('adapterType').disabled;
 }
 
