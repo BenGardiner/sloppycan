@@ -109,7 +109,12 @@ function openSocketTunnel(url) {
     ws.onerror = () => {
       if (settled) return;
       settled = true;
-      reject(new Error('Socket tunnel connection failed'));
+      let msg = `WebSocket connection failed (${url})`;
+      if (url.startsWith('wss://')) {
+        const httpUrl = url.replace('wss://', 'https://');
+        msg += `. If using self-signed certs, open ${httpUrl} in a browser tab to accept the certificate, then try again.`;
+      }
+      reject(new Error(msg));
     };
     ws.onclose = () => {
       if (!settled) {

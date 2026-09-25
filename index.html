@@ -115,11 +115,11 @@
           <option value="gsusb">gs_usb</option>
         </select>
       </label>
-      <label id="socketTunnelRow" class="header-check" style="display:none;flex-direction:column;align-items:stretch;gap:4px;white-space:normal"
+      <div id="socketTunnelRow" class="connect-pop-field" style="display:none;flex-direction:column;align-items:stretch;gap:4px;white-space:normal"
              title="WebSocket endpoint that tunnels bytes to a remote raw TCP SLCAN socket (python-can socket:// compatible). Raw SLCAN only - no telnet negotiation.">
         <span class="hdr-tag">SLCAN socket tunnel (raw, no telnet)</span>
-        <input id="socketTunnelUrl" type="text" value="ws://127.0.0.1:29542/" placeholder="ws://host:port/path">
-      </label>
+        <input id="socketTunnelUrl" type="text" value="ws://127.0.0.1:29542/" placeholder="socket://host:port or ws://host:port/path">
+      </div>
       <label class="header-check" title="CAN bus bit rate. Must match the bus you're tapping - a mismatch means no frames (or an error storm).">
         <span class="hdr-tag">Baudrate</span>
         <select id="baudRate" class="hdr-select">
