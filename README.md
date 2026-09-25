@@ -87,8 +87,8 @@ websocat -E ws-l:127.0.0.1:29542 tcp:REMOTE_HOST:REMOTE_PORT
 ```
 
 Then in SloppyCAN set the tunnel URL to `ws://127.0.0.1:29542/`.
-Prefer binding the tunnel to localhost (or a tightly scoped private interface) and enforce an
-origin allowlist/TLS on any shared endpoint, because the browser side is WebSocket-based.
+
+> **Warning**: A WebSocket SLCAN listener exposed to a network allows anyone on that network to send CAN traffic — there is no authentication. Prefer binding the tunnel to localhost (`127.0.0.1`) or a tightly scoped private interface, and enforce an origin allowlist and TLS on any shared endpoint.
 
 ## Features
 
