@@ -4412,7 +4412,7 @@ function defaultWorkspaceData() {
     filter: { frameType: 'all', dataType: 'all', ids: '', idsExclude: false, data: '',
               onlyUnseen: false, onlyHighlighted: false, onlyRx: false },
     notch: { duration: '1', hotMs: 500 },
-    adapterType: 'socket', socketUrl: 'socket://sim.nmfta.org:33939',
+    adapterType: 'socket', socketUrl: 'socket://sim.fleetcyberchallenge.com:33939',
     baud: 'S6', listenOnly: false, autoOpen: true,
     tx: [ { enabled: false, ext: false, rtr: false, id: '7DF', dlc: 8,
             data: '02 3E 00 00 00 00 00 00', period: 100, note: 'Broadcasts UDS Tester Present' } ],
@@ -4537,7 +4537,7 @@ function applySettings(d) {
     const firstEnabled = Array.from(adapterSel.options).find(o => !o.disabled);
     if (firstEnabled) adapterSel.value = firstEnabled.value;
   }
-  const socketVal = (d.socketUrl && !d.socketUrl.includes('127.0.0.1') && !d.socketUrl.includes('0.cloud.chals.io')) ? d.socketUrl : 'socket://sim.nmfta.org:33939';
+  const socketVal = (d.socketUrl && !d.socketUrl.includes('127.0.0.1') && !d.socketUrl.includes('0.cloud.chals.io') && !d.socketUrl.includes('sim.nmfta.org')) ? d.socketUrl : 'socket://sim.fleetcyberchallenge.com:33939';
   _el('socketTunnelUrl').value = socketVal;
   updateAdapterSettingsUi();
   _el('baudRate').value    = d.baud ?? 'S6';
